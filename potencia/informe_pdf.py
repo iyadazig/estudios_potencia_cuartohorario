@@ -15,7 +15,7 @@ from reportlab.platypus import (Image, PageBreak, Paragraph, SimpleDocTemplate, 
                                 TableStyle)
 
 from .calculo import MESES_NOMBRE, fmt, fmt_pot, ruta_recurso, texto_conceptos
-from .graficos import (AZUL_OSCURO, COLORES_SUAVES, color, dibujar_costes, dibujar_curva,
+from .graficos import (AZUL_OSCURO, COLORES_SUAVES, color, dibujar_costes, dibujar_curva_paneles,
                        dibujar_maximos)
 
 GRIS = colors.HexColor("#D9D9D9")
@@ -200,6 +200,53 @@ def _tabla_anexo(titulo, estudio, matriz, dec, fila_extra, etiqueta_extra, max_c
     return t
 
 
+def _tabla_coste_mensual(estudio, escenarios):
+    """Coste mensual de cada escenario: término fijo, excesos y total."""
+    n = len(escenarios)
+    fuente = 7 if n <= 4 else 6.3
+    cab0 = [Paragraph("COSTE DE LA POTENCIA POR MES (€) <font color='#FFFF00'>(sin i.e.)</font>", _E["celda"])] +         [""] * (3 * n)
+    cab1 = [""]
+    for e in escenarios:
+        cab1 += [Paragraph(e.nombre, _E["celda"]), "", ""]
+    cab2 = ["Mes"] + ["T. Fijo", "T. Excesos", "Total"] * n
+    filas = [cab0, cab1, cab2]
+    for i, mes in enumerate(estudio.etiquetas_meses):
+        fila = [mes]
+        for e in escenarios:
+            f, x = e.coste.fijo[i].sum(), e.coste.exceso[i].sum()
+            fila += [fmt(f), fmt(x), fmt(f + x)]
+        filas.append(fila)
+    fila = ["Total"]
+    for e in escenarios:
+        fila += [fmt(e.coste.total_fijo), fmt(e.coste.total_exceso), fmt(e.coste.total)]
+    filas.append(fila)
+
+    w = (277 - 18) / (3 * n)
+    t = Table(filas, colWidths=[18 * mm] + [w * mm] * (3 * n))
+    est = [
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"), ("FONTSIZE", (0, 0), (-1, -1), fuente),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("SPAN", (0, 0), (-1, 0)), ("SPAN", (0, 1), (0, 2)),
+        ("BACKGROUND", (0, 0), (-1, 0), AZUL), ("BACKGROUND", (0, 1), (0, 2), AZUL),
+        ("TEXTCOLOR", (0, 1), (0, 2), colors.white), ("FONTNAME", (0, 0), (-1, 2), "Helvetica-Bold"),
+        ("GRID", (0, 1), (-1, -2), 0.4, colors.white),
+        ("FONTNAME", (0, 3), (0, -1), "Helvetica-Bold"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.8, AZUL),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.6), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.6),
+    ]
+    for k in range(n):
+        c0 = 1 + 3 * k
+        est += [("SPAN", (c0, 1), (c0 + 2, 1)),
+                ("BACKGROUND", (c0, 1), (c0 + 2, 1), colors.HexColor(color(k))),
+                ("BACKGROUND", (c0, 2), (c0 + 2, 2), colors.HexColor(COLORES_SUAVES[k % len(COLORES_SUAVES)])),
+                ("BACKGROUND", (c0, 3), (c0 + 1, -2), FILA_CLARA),
+                ("BACKGROUND", (c0 + 2, 3), (c0 + 2, -1), colors.HexColor(COLORES_SUAVES[k % len(COLORES_SUAVES)])),
+                ("FONTNAME", (c0 + 2, 3), (c0 + 2, -1), "Helvetica-Bold"),
+                ("LINEBEFORE", (c0, 1), (c0, -1), 1.2, colors.white)]
+    t.setStyle(TableStyle(est))
+    return t
+
+
 def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anexos=True):
     """
     datos: dict con titular, cups, tarifa, instalacion, direccion, zona, fecha.
@@ -231,7 +278,8 @@ def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anex
     izquierda = [Paragraph(n, _E["pie"]) for n in notas]
 
     ini, fin = estudio.meses[0], estudio.meses[-1]
-    tipo = "horaria (cuartos de hora estimados con la potencia media horaria)" if curva.es_horaria         else "cuartohoraria"
+    tipo = ("horaria (cuartos de hora estimados con la potencia media horaria)" if curva.es_horaria
+            else "cuartohoraria")
     derecha = [Paragraph("<u>Normativa de referencia:</u>", _E["normal"])]
     derecha += [Paragraph(n, _E["pie"]) for n in normativa]
     derecha += [Spacer(1, 1.5 * mm), Paragraph("<u>Notas:</u>", _E["normal"]), Paragraph(
@@ -255,8 +303,12 @@ def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anex
         historia.append(_tabla_anexo("POTENCIAS MÁXIMAS DEMANDADAS (kW)", estudio, maximos, 0,
                                      (max_p, max_p.max(), max_p / max_p.max() if max_p.max() else max_p * 0),
                                      "Porcentaje", max_col=True))
-        historia += [PageBreak(), _cabecera(datos, "ANEXO: Curva de carga"), Spacer(1, 3 * mm),
-                     _figura_png(dibujar_curva, 270, 85, estudio, escenarios[:3]), Spacer(1, 2 * mm),
-                     _figura_png(dibujar_maximos, 270, 75, estudio, escenarios[0].pc)]
+        historia += [PageBreak(), _cabecera(datos, "ANEXO: Coste de la potencia por mes"), Spacer(1, 4 * mm),
+                     _tabla_coste_mensual(estudio, escenarios), Spacer(1, 2 * mm),
+                     Paragraph("T. Fijo: término de potencia contratada (peajes + cargos). T. Excesos: facturación por "
+                               "excesos de potencia cuartohorarios (art. 9 de la Circular 3/2020).", _E["pie"])]
+        historia += [PageBreak(), _cabecera(datos, "ANEXO: Curva de carga"), Spacer(1, 2 * mm),
+                     _figura_png(dibujar_curva_paneles, 275, 105, estudio, escenarios), Spacer(1, 1 * mm),
+                     _figura_png(dibujar_maximos, 275, 62, estudio, escenarios[0].pc)]
 
     doc.build(historia)
