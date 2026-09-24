@@ -353,7 +353,6 @@ class LectorCurva:
             if pct > 5:
                 avisos.append("¡Atención! Más del 5 % de la curva es estimada: el resultado puede no ser fiable.")
 
-        estimado = serie["estimado"].to_numpy()
         if paso > 15:
             serie = self._a_cuartos(serie, paso)
             avisos.append("Curva HORARIA: se ha estimado cada cuarto de hora con la potencia media de su hora "

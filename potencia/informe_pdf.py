@@ -11,7 +11,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import (Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
+from reportlab.platypus import (Image, KeepInFrame, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
                                 TableStyle)
 
 from .calculo import MESES_NOMBRE, fmt, fmt_pot, ruta_recurso, texto_conceptos
@@ -247,17 +247,21 @@ def _tabla_coste_mensual(estudio, escenarios):
     return t
 
 
-def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anexos=True, seleccion_curva=(0, None)):
-    """
-    datos: dict con titular, cups, tarifa, instalacion, direccion, zona, fecha.
-    escenarios: [Actual, Propuesta 1, ...] (calculo.Escenario).
-    curva: potencia.lector_curva.CurvaCargada (para las notas).
-    seleccion_curva: (periodo, mes) del gráfico de la curva, igual que el selector de la interfaz
-                     (periodo 0 = todos; mes None = año completo).
-    """
-    doc = SimpleDocTemplate(str(ruta), pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm,
-                            topMargin=8 * mm, bottomMargin=8 * mm,
-                            title="Optimización de la potencia contratada", author="GE&PE Ingeniería")
+def _documento(ruta):
+    return SimpleDocTemplate(str(ruta), pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm,
+                             topMargin=8 * mm, bottomMargin=8 * mm,
+                             title="Optimización de la potencia contratada", author="GE&PE Ingeniería")
+
+
+def _mes_seleccion(estudio, mes):
+    """El mes del selector puede venir como índice o como etiqueta ('feb.-26')."""
+    if isinstance(mes, str):
+        return estudio.etiquetas_meses.index(mes) if mes in estudio.etiquetas_meses else None
+    return mes
+
+
+def _historia_suministro(datos, estudio, escenarios, curva, normativa, incluir_anexos, seleccion_curva):
+    """Páginas de un suministro: resumen (página 1) y, opcionalmente, sus anexos."""
     historia = [_cabecera(datos, "Optimización de la potencia contratada"), Spacer(1, 1 * mm),
                 _datos_cliente(datos), Spacer(1, 2 * mm)]
 
@@ -292,6 +296,9 @@ def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anex
     historia.append(Table([[izquierda, derecha]], colWidths=[118 * mm, 159 * mm], hAlign="LEFT",
                           style=[("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
 
+    # la página de resumen se reduce si hace falta para que quepa siempre en una hoja
+    historia = [KeepInFrame(277 * mm, 192 * mm, historia, mode="shrink")]
+
     if incluir_anexos:
         energia = estudio.energia_kwh()
         maximos = estudio.maximos()
@@ -310,8 +317,93 @@ def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anex
                      Paragraph("T. Fijo: término de potencia contratada (peajes + cargos). T. Excesos: facturación por "
                                "excesos de potencia cuartohorarios (art. 9 de la Circular 3/2020).", _E["pie"])]
         historia += [PageBreak(), _cabecera(datos, "ANEXO: Curva de carga"), Spacer(1, 2 * mm),
-                     _figura_png(dibujar_curva_selector, 275, 105, estudio, escenarios, *seleccion_curva),
+                     _figura_png(dibujar_curva_selector, 275, 105, estudio, escenarios, seleccion_curva[0],
+                                 _mes_seleccion(estudio, seleccion_curva[1])),
                      Spacer(1, 1 * mm),
                      _figura_png(dibujar_maximos, 275, 62, estudio, escenarios[0].pc)]
 
-    doc.build(historia)
+    return historia
+
+
+def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anexos=True, seleccion_curva=(0, None)):
+    """
+    Informe de un suministro.
+    datos: dict con titular, cups, tarifa, instalacion, direccion, zona, fecha.
+    escenarios: [Actual, Propuesta 1, ...] (calculo.Escenario).
+    curva: potencia.lector_curva.CurvaCargada (para las notas).
+    seleccion_curva: (periodo, mes) del gráfico de la curva, igual que el selector de la interfaz
+                     (periodo 0 = todos; mes None = año completo, índice o etiqueta 'feb.-26').
+    """
+    _documento(ruta).build(_historia_suministro(datos, estudio, escenarios, curva, normativa, incluir_anexos,
+                                                seleccion_curva))
+
+
+def _tabla_resumen_cups(filas, resumen):
+    """Una fila por suministro con el coste actual, el óptimo, el ahorro y la inversión; fila final de totales."""
+    cab = ["Nº", "CUPS", "Denominación", "Tarifa", "Zona", "Coste actual (€)", "Coste óptimo (€)",
+           "Ahorro (€)", "%", "Inversión (€)", "PRS (años)"]
+    datos = [[Paragraph(c, _E["celda"]) for c in cab]]
+    for k, f in enumerate(filas, 1):
+        datos.append([str(k), f["cups"], Paragraph(f["denominacion"] or "-", _E["pie"]), f["tarifa"], f["zona"],
+                      fmt(f["actual"]), fmt(f["optima"]), fmt(f["ahorro"]), f"{fmt(100 * f['pct'], 1)}%",
+                      fmt(f["inversion"], 2) if f["inversion"] else "-",
+                      fmt(f["prs"], 2) if f["prs"] is not None else "-"])
+    act, opt = resumen.escenarios
+    datos.append(["", "TOTAL", "", "", "", fmt(act.coste.total), fmt(opt.coste.total), fmt(opt.ahorro),
+                  f"{fmt(100 * opt.ahorro_pct, 1)}%", fmt(opt.inversion["total"], 2) if opt.inversion["total"] else "-",
+                  fmt(opt.prs, 2) if opt.prs is not None else "-"])
+    anchos = [9, 42, 58, 15, 22, 24, 24, 22, 13, 22, 18]
+    t = Table(datos, colWidths=[a * mm for a in anchos], repeatRows=1)
+    est = [
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"), ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (5, 1), (-1, -1), "RIGHT"),
+        ("BACKGROUND", (0, 0), (-1, 0), AZUL), ("GRID", (0, 0), (-1, -2), 0.4, colors.white),
+        ("BACKGROUND", (0, 1), (-1, -2), FILA_CLARA),
+        ("BACKGROUND", (5, 1), (5, -2), colors.HexColor(COLORES_SUAVES[0])),
+        ("BACKGROUND", (6, 1), (6, -2), colors.HexColor(COLORES_SUAVES[1])),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"), ("LINEABOVE", (0, -1), (-1, -1), 0.8, AZUL),
+        ("BACKGROUND", (7, -1), (7, -1), colors.HexColor(color(1))), ("TEXTCOLOR", (7, -1), (7, -1), colors.white),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+    ]
+    for k, f in enumerate(filas, 1):
+        if f["ahorro"] < 0:
+            est.append(("TEXTCOLOR", (7, k), (7, k), ROJO))
+    t.setStyle(TableStyle(est))
+    t.hAlign = "LEFT"
+    return t
+
+
+def generar_pdf_multipunto(ruta, datos, suministros, resumen, filas_cups, normativa, incluir_anexos=True,
+                           seleccion_curva=(0, None)):
+    """
+    Informe multipunto: resumen conjunto y después las páginas de cada suministro.
+    datos: dict con titular y fecha.
+    suministros: [{"datos": dict, "estudio": Estudio, "escenarios": [...], "curva": CurvaCargada}, ...]
+    resumen: calculo.ResumenMultipunto.  filas_cups: filas de la tabla resumen por CUPS.
+    """
+    info = Table([["Titular", Paragraph(f"<b>{datos.get('titular', '')}</b>", _E["normal"])],
+                  ["Suministros", Paragraph(f"<b>{len(suministros)}</b> (estudio multipunto)", _E["normal"])]],
+                 colWidths=[22 * mm, 150 * mm], hAlign="LEFT",
+                 style=[("FONTSIZE", (0, 0), (-1, -1), 7.5), ("ALIGN", (0, 0), (0, -1), "RIGHT"),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5), ("TOPPADDING", (0, 0), (-1, -1), 0.5)])
+    escs = resumen.escenarios
+    historia = [_cabecera(datos, "Optimización de la potencia – Resumen multipunto"), Spacer(1, 1 * mm), info,
+                Spacer(1, 2 * mm),
+                Table([[_tabla_mensual(resumen, escs, 110), _figura_png(dibujar_costes, 160, 68, resumen, escs)]],
+                      colWidths=[113 * mm, 164 * mm], hAlign="LEFT",
+                      style=[("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]),
+                Spacer(1, 2 * mm), _tabla_resumen_cups(filas_cups, resumen), Spacer(1, 1.5 * mm),
+                Paragraph("El resumen conjunto compara la situación actual con la propuesta óptima (Propuesta 1) de "
+                          "cada suministro. El detalle de cada suministro figura en las páginas siguientes.", _E["pie"])]
+    if resumen.periodos_distintos:
+        historia.append(Paragraph("Atención: las curvas de los suministros no cubren los mismos meses; el resumen "
+                                  "mensual suma los meses disponibles de cada uno.", _E["pie"]))
+    historia.append(Spacer(1, 1.5 * mm))
+    historia.append(Paragraph("<u>Normativa de referencia:</u>", _E["normal"]))
+    historia += [Paragraph(n, _E["pie"]) for n in normativa]
+    for s in suministros:
+        historia.append(PageBreak())
+        historia += _historia_suministro(s["datos"], s["estudio"], s["escenarios"], s["curva"], normativa,
+                                         incluir_anexos, seleccion_curva)
+    _documento(ruta).build(historia)

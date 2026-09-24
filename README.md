@@ -19,12 +19,26 @@ pip install -r requirements.txt
 python main.py
 ```
 
-1. Al arrancar se elige la **zona** (Península, Illes Balears, Canarias, Ceuta o Melilla).
+1. Al arrancar se elige el **tipo de estudio** (individual o multipunto) y la **zona** (Península, Illes Balears,
+   Canarias, Ceuta o Melilla).
 2. Se rellenan los datos del suministro y la tarifa.
 3. **Cargar curva de carga…**: se muestra cómo se ha interpretado el fichero (columnas, unidad, convenio horario,
    huecos, cambios de hora) y se pueden corregir los ajustes antes de aceptar.
 4. Se introducen las potencias actuales y se pulsa **CALCULAR**.
 5. **EXPORTAR PDF** genera el informe (con o sin anexos).
+
+## Estudio multipunto
+
+En la ventana inicial se elige **Multipunto** para estudiar varios suministros a la vez:
+
+1. Se carga **un único fichero** con la curva de todos los CUPS (debe tener una columna con el CUPS de cada registro).
+2. Aparece un bloque por CUPS donde se indican su denominación, dirección, **tarifa**, **zona** y potencias actuales.
+   Cada CUPS tiene su Propuesta 1 (óptima), su Propuesta 2 editable y su propio menú **➕ Propuestas**.
+3. Arriba se muestra el **resumen conjunto** (situación actual frente a la óptima de cada CUPS, mes a mes) y una
+   tabla con una fila por CUPS (coste actual, óptimo, ahorro, inversión y PRS) y el total.
+4. En los anexos se elige un CUPS concreto o **Todos (suma)**.
+5. El PDF incluye la página de resumen conjunto y, a continuación, las páginas de cada CUPS (con sus anexos si se
+   piden).
 
 ## Ficheros de curva admitidos
 

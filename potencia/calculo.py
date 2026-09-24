@@ -258,6 +258,52 @@ def evaluar(estudio, propuestas, pc_actual):
     return res
 
 
+class ResumenMultipunto:
+    """
+    Suma de varios suministros (estudio multipunto): situación actual frente a la
+    propuesta óptima (Propuesta 1) de cada uno, mes a mes.
+    Imita la interfaz de Estudio que usan las tablas y gráficos (meses, etiquetas_meses,
+    dias_mes, dias_totales, energia_kwh) y expone `escenarios` = [Actual, Óptima].
+    """
+
+    def __init__(self, lista):
+        """lista: [(estudio, escenarios), ...] de cada suministro ya calculado."""
+        self.meses = sorted(set().union(*(set(est.meses) for est, _ in lista)))
+        pos = {m: i for i, m in enumerate(self.meses)}
+        n = len(self.meses)
+        self.dias_mes = np.zeros(n, dtype=int)
+        self._energia = np.zeros((n, N_P))
+        fijo = np.zeros((2, n, N_P))
+        exceso = np.zeros((2, n, N_P))
+        inversion = 0.0
+        for est, escs in lista:
+            idx = [pos[m] for m in est.meses]
+            self.dias_mes[idx] = np.maximum(self.dias_mes[idx], est.dias_mes)
+            self._energia[idx] += est.energia_kwh()
+            for k in (0, 1):
+                fijo[k, idx] += escs[k].coste.fijo
+                exceso[k, idx] += escs[k].coste.exceso
+            inversion += escs[1].inversion.get("total", 0.0)
+        actual = Escenario("Actual", np.full(N_P, np.nan), Coste(fijo[0], exceso[0]))
+        c_opt = Coste(fijo[1], exceso[1])
+        ahorro = actual.coste.total - c_opt.total
+        pct = ahorro / actual.coste.total if actual.coste.total else 0.0
+        optima = Escenario("Óptima", np.full(N_P, np.nan), c_opt, {"total": inversion, "conceptos": []}, ahorro, pct)
+        self.escenarios = [actual, optima]
+        self.periodos_distintos = len({tuple(est.meses) for est, _ in lista}) > 1
+
+    @property
+    def etiquetas_meses(self):
+        return [f"{MESES_ABR[m.month - 1]}-{m.year % 100:02d}" for m in self.meses]
+
+    @property
+    def dias_totales(self):
+        return int(self.dias_mes.sum())
+
+    def energia_kwh(self):
+        return self._energia.copy()
+
+
 # --------------------------------------------------------------------------
 # formato numérico español
 # --------------------------------------------------------------------------

@@ -119,3 +119,13 @@ def escribir_ancho_horario(fis, ruta):
     ancho.columns = [f"H{c}" for c in ancho.columns]
     ancho = ancho.reset_index().rename(columns={"dia": "Fecha"})
     ancho.to_excel(ruta, index=False)
+
+
+def escribir_p5d_multipunto(curvas, ruta):
+    """Varios CUPS en un único fichero P5D: curvas = {cups: curva_fisica}."""
+    lineas = []
+    for cups, fis in curvas.items():
+        loc = _etiquetas_fin(fis)
+        verano = np.array([bool(x.dst()) for x in loc]).astype(int)
+        lineas += [f"{cups};{l:%Y/%m/%d %H:%M};{v};{k / 4:.4f};0" for l, v, k in zip(loc, verano, fis["kw"])]
+    ruta.write_text("\n".join(lineas), encoding="utf-8")
