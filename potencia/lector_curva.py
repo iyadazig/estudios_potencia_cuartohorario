@@ -38,7 +38,13 @@ import pandas as pd
 
 from .calendario import dias_cambio_hora, hora_cambio_horario, zona_horaria
 
-UNIDADES = ["Automática", "kW", "kWh", "Wh"]
+UNIDADES = ["Automática", "kW", "kWh", "Wh", "MW", "MWh", "W"]
+# factor para pasar el valor a kW: potencia -> constante; energía del intervalo -> depende del paso (min)
+_POTENCIA = {"kW": 1.0, "MW": 1000.0, "W": 0.001}
+_ENERGIA = {"kWh": 1.0, "MWh": 1000.0, "Wh": 0.001}
+# símbolo de unidad aislado (no pegado a otras letras): "(kW)", "_kWh", "[MWh]", "kW·h", "kW-h"
+_RE_UNIDAD = re.compile(r"(?<![a-z])(mw\s*[-.]?\s*h|kw\s*[-.]?\s*h|wh|mw|kw|w)(?![a-z0-9])")
+_TOKENS = {"mwh": "MWh", "kwh": "kWh", "wh": "Wh", "mw": "MW", "kw": "kW", "w": "W"}
 CONVENIOS = ["Automático", "Fin de periodo", "Inicio de periodo"]
 
 _RE_FECHA_DMY = re.compile(r"^\s*\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}")
@@ -62,6 +68,7 @@ class CurvaCargada:
     columnas: dict = field(default_factory=dict)
     avisos: list = field(default_factory=list)
     n_registros: int = 0
+    origen_unidad: str = ""
     huecos_rellenados: int = 0
     dias_cambio_hora: list = field(default_factory=list)
 
@@ -76,6 +83,18 @@ class CurvaCargada:
     @property
     def es_horaria(self):
         return self.resolucion_min > 15
+
+    @property
+    def descripcion_unidad(self):
+        """Unidad, de dónde se ha sacado y cómo se pasa a potencia en kW."""
+        if self.unidad in _POTENCIA:
+            como = "valores de potencia: se usan directamente" + (
+                "" if self.unidad == "kW" else f" (pasados de {self.unidad} a kW)")
+        else:
+            como = (f"valores de energía de cada intervalo de {self.resolucion_min} min: se convierten a potencia "
+                    f"media en kW (× {60 / self.resolucion_min:g}" +
+                    ("" if self.unidad == "kWh" else f", pasando de {self.unidad} a kWh") + ")")
+        return f"{self.unidad} – {self.origen_unidad}; {como}"
 
 
 # --------------------------------------------------------------------------
@@ -302,7 +321,7 @@ class LectorCurva:
         df = self.tablas[hoja].reset_index(drop=True)
         avisos = []
 
-        cab, datos = self._separar_cabecera(df)
+        cab, datos, preambulo = self._separar_cabecera(df)
         nombres = [(_norm(c) if not _vacio(c) else "") for c in cab] if cab is not None else [""] * df.shape[1]
         datos = datos.copy()
         datos.columns = range(datos.shape[1])
@@ -328,14 +347,18 @@ class LectorCurva:
             raise ValueError("No se han podido interpretar registros de fecha/hora y valor.")
 
         # unidad
-        unidad_det = unidad
+        unidad_det, origen = unidad, "elegida a mano"
         if unidad == "Automática":
-            unidad_det = self._detectar_unidad(col.get("nombre_valor", ""))
+            unidad_det, origen = self._unidad_automatica(col, datos, preambulo)
             if unidad_det is None:
-                unidad_det = "kWh"
-                avisos.append("No se ha podido identificar la unidad por la cabecera; se asume kWh "
-                              "(energía del intervalo, estándar de las distribuidoras). Revísalo.")
-        factor = {"kW": 1.0, "kWh": 60.0 / paso, "Wh": 60.0 / paso / 1000.0}[unidad_det]
+                unidad_det, origen = "kWh", "supuesta (no indicada en el fichero)"
+                avisos.append("No se ha podido identificar la unidad (ni en el título de las columnas, ni en una "
+                              "columna de unidades, ni encima de la tabla); se asume kWh (energía del intervalo, "
+                              "estándar de las distribuidoras). Revísalo.")
+        if unidad_det in _POTENCIA:
+            factor = _POTENCIA[unidad_det]
+        else:
+            factor = _ENERGIA[unidad_det] * 60.0 / paso
         registros["kw"] = registros["valor"] * factor
 
         negativos = (registros["kw"] < 0).sum()
@@ -363,7 +386,7 @@ class LectorCurva:
 
         return CurvaCargada(
             datos=serie.reset_index(drop=True),
-            archivo=self.ruta, hoja=hoja, resolucion_min=paso, unidad=unidad_det,
+            archivo=self.ruta, hoja=hoja, resolucion_min=paso, unidad=unidad_det, origen_unidad=origen,
             convenio=conv_txt, cups=cups_sel,
             columnas={k: v for k, v in col.items() if k.startswith("nombre_") or k == "formato"},
             avisos=avisos, n_registros=n_registros, huecos_rellenados=int(huecos),
@@ -388,14 +411,35 @@ class LectorCurva:
                 break
         if inicio is None:
             raise ValueError("No se ha encontrado el bloque de datos (filas con fecha y valor).")
-        cab = None
+        def textos(fila):
+            return [v for v in fila if isinstance(v, str) and v.strip() and not _parece_fecha(v)]
+
+        # fila de títulos: la más cercana a los datos con varios textos (o solo texto); las filas que haya
+        # entre ella y los datos (p. ej. una fila con las unidades) se unen a los títulos por columna
+        cab, j_cab = None, inicio
         for j in range(inicio - 1, max(-1, inicio - 4), -1):
             fila = df.iloc[j]
-            textos = [v for v in fila if isinstance(v, str) and v.strip() and not _parece_fecha(v)]
-            if len(textos) >= 2 or (len(textos) >= 1 and fila.notna().sum() == len(textos)):
-                cab = list(fila)
+            tx = textos(fila)
+            if len(tx) >= 2 or (tx and sum(not _vacio(v) for v in fila) == len(tx) and j == inicio - 1
+                                and j - 1 >= 0 and len(textos(df.iloc[j - 1])) < 2):
+                j_cab = j
                 break
-        return cab, df.iloc[inicio:]
+
+        def es_fila_unidades(fila):
+            tx = [_norm(v) for v in textos(fila)]
+            return bool(tx) and all(_RE_UNIDAD.fullmatch(v.strip("()[] ")) or re.fullmatch(r"[dmayhs/:.\- ]+", v)
+                                    for v in tx)
+
+        # si la fila elegida solo tiene unidades o formatos (kW, dd/mm/aaaa, hh:mm), los títulos están encima
+        if 0 < j_cab < inicio and es_fila_unidades(df.iloc[j_cab]) and len(textos(df.iloc[j_cab - 1])) >= 2:
+            j_cab -= 1
+        if j_cab < inicio:
+            bloque = df.iloc[j_cab:inicio]
+            cab = [" ".join(str(v).strip() for v in bloque[c] if isinstance(v, str) and v.strip()) or None
+                   for c in df.columns]
+        # texto de las filas anteriores (títulos, notas del tipo «Unidades: kW»)
+        preambulo = " ".join(" ".join(textos(df.iloc[k])) for k in range(max(0, j_cab - 30), j_cab))
+        return cab, df.iloc[inicio:], preambulo
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -512,7 +556,7 @@ class LectorCurva:
             if any(k in n for k in excluir) or n in ("as", "r1", "r2", "r3", "r4", "hora", "h"):
                 continue
             puntos = max([p for k, p in positivos if k in n] + [0])
-            if n == "ae":
+            if re.match(r"^ae\b", n):
                 puntos = 6
             if n in ("r", "q"):
                 continue
@@ -523,21 +567,61 @@ class LectorCurva:
         c = candidatas[0][1]
         col["valor"] = c
         col["nombre_valor"] = info[c]["nombre"] or f"columna {c + 1}"
+        usadas.add(c)
+        # columna con la unidad de cada registro («Unidad», «Magnitud»… o valores kW / kWh)
+        for c, i in info.items():
+            if c in usadas:
+                continue
+            vals = muestra[c][~muestra[c].map(_vacio)].astype(str).map(_norm)
+            son_unidades = vals.map(lambda v: v in _TOKENS or v in ("kw h", "kw-h", "mw h")).mean() > 0.9
+            if son_unidades or any(k in i["nombre"] for k in ("unidad", "unit", "magnitud", "uom")):
+                col["unidad"] = c
+                col["nombre_unidad"] = i["nombre"] or f"columna {c + 1}"
+                break
         return col
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _detectar_unidad(nombre):
+    def _unidades_en(texto):
+        """Unidades explícitas (kW, kWh, Wh, MW, MWh, W) que aparecen en un texto, sin repetir."""
+        res = []
+        for m in _RE_UNIDAD.finditer(_norm(texto)):
+            u = _TOKENS[re.sub(r"[\s.-]", "", m.group(1))]
+            if u not in res:
+                res.append(u)
+        return res
+
+    @classmethod
+    def _detectar_unidad(cls, nombre):
+        """Unidad a partir del título de la columna: símbolo explícito o, si no hay, palabras clave."""
+        explicitas = cls._unidades_en(nombre)
+        if explicitas:
+            return explicitas[0]
         n = _norm(nombre)
-        if "kwh" in n or "kw h" in n:
-            return "kWh"
-        if re.search(r"(^|[^k])wh\b", n):
-            return "Wh"
-        if re.search(r"\bkw\b", n) or "potencia" in n:
+        if "potencia" in n:
             return "kW"
-        if any(k in n for k in ("consumo", "energia", "entrante")) or n == "ae":
+        if any(k in n for k in ("consumo", "energia", "entrante")) or re.match(r"^ae\b", n):
             return "kWh"
         return None
+
+    def _unidad_automatica(self, col, datos, preambulo):
+        """(unidad, de dónde se ha sacado) o (None, "") si el fichero no la indica."""
+        titulo = col.get("nombre_valor", "")
+        explicitas = self._unidades_en(titulo)
+        if explicitas:
+            return explicitas[0], f"indicada en el título de la columna «{titulo}»"
+        if "unidad" in col:
+            vals = [u[0] for u in datos[col["unidad"]].astype(str).map(self._unidades_en) if u]
+            if vals:
+                u = max(set(vals), key=vals.count)
+                return u, f"indicada en la columna de unidades «{col['nombre_unidad']}»"
+        nota = self._unidades_en(preambulo)
+        if len(nota) == 1:
+            return nota[0], "indicada en el texto encima de la tabla"
+        u = self._detectar_unidad(titulo)
+        if u:
+            return u, f"deducida de la palabra del título «{titulo}»"
+        return None, ""
 
     # ------------------------------------------------------------------
     def _construir_registros(self, datos, col, zona, convenio, avisos):

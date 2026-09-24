@@ -51,8 +51,14 @@ El lector (`potencia/lector_curva.py`) detecta automáticamente:
 | Fecha y hora | Una columna fecha-hora, o fecha + hora (+ cuarto), o formato ancho (una fila por día y 24/25 columnas) |
 | Hora | `HH:MM`, horas enteras 0-23 o 1-24/25, fracciones de día de Excel, ISO 8601 con desfase horario |
 | Resolución | Cuartohoraria (15 min) u horaria (60 min) |
-| Unidad | kW (potencia media), kWh o Wh (energía del intervalo) |
+| Unidad | kW, MW o W (potencia media: se usa tal cual) o kWh, MWh o Wh (energía del intervalo: se convierte a kW) |
 | Varios CUPS | Se elige cuál estudiar |
+
+**Unidad.** Se lee de los títulos de las columnas y del resto del fichero, por este orden: el título de la columna de
+valores (`Potencia (kW)`, `AE_kWh`, `Consumo [MWh]`…, incluida una fila de unidades debajo de los títulos), una
+columna de unidades (`Unidad`, `Magnitud`), una nota encima de la tabla (`Unidades: kW`) y, si no hay símbolo, las
+palabras del título («potencia» → kW; «consumo», «energía» → kWh). El diálogo de carga indica de dónde se ha sacado
+la unidad y si los valores se usan como potencia o se convierten; se puede cambiar a mano.
 
 **Convenio horario.** Según el Sistema de Medidas de REE (*Ficheros para el intercambio de información de
 medida*), la etiqueta de tiempo de cada registro corresponde al **final** del periodo de integración: el primer

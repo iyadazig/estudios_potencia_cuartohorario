@@ -241,7 +241,8 @@ class DialogoCarga(tk.Toplevel):
             "Columnas usadas: " + ", ".join(f"{k.replace('nombre_', '')} = «{v}»"
                                              for k, v in c.columnas.items() if k.startswith("nombre_")),
             f"Resolución original: {'CUARTOHORARIA (15 min)' if c.resolucion_min == 15 else f'HORARIA ({c.resolucion_min} min)'}"
-            f"   ·   Unidad: {c.unidad}   ·   Hora del registro: {c.convenio}",
+            f"   ·   Hora del registro: {c.convenio}",
+            f"Unidad: {c.descripcion_unidad}",
             f"Periodo: {c.fecha_inicio:%d/%m/%Y %H:%M} – {c.fecha_fin:%d/%m/%Y %H:%M}   ·   "
             f"{len(d):,} cuartos de hora ({c.n_registros:,} registros leídos)".replace(",", "."),
             f"Potencia máxima: {fmt(d['kw'].max(), 1)} kW   ·   Energía total: {fmt(energia)} kWh",
@@ -1130,8 +1131,8 @@ class App(tk.Tk):
             if self.multipunto:
                 lineas.append(f"══ CUPS {s.cups} ══")
             lineas += [f"Fichero: {c.archivo}", f"Hoja: {c.hoja}" if c.hoja else None,
-                       f"Resolución original: {c.resolucion_min} min · Unidad: {c.unidad} · "
-                       f"Hora del registro: {c.convenio}",
+                       f"Resolución original: {c.resolucion_min} min · Hora del registro: {c.convenio}",
+                       f"Unidad: {c.descripcion_unidad}",
                        f"Registros leídos: {c.n_registros:,}".replace(",", "."),
                        f"Periodo del estudio: {c.fecha_inicio:%d/%m/%Y %H:%M} – {c.fecha_fin:%d/%m/%Y %H:%M}",
                        f"Intervalos rellenados (huecos): {c.huecos_rellenados}",
