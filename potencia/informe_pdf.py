@@ -15,7 +15,7 @@ from reportlab.platypus import (Image, PageBreak, Paragraph, SimpleDocTemplate, 
                                 TableStyle)
 
 from .calculo import MESES_NOMBRE, fmt, fmt_pot, ruta_recurso, texto_conceptos
-from .graficos import (AZUL_OSCURO, COLORES_SUAVES, color, dibujar_costes, dibujar_curva_paneles,
+from .graficos import (AZUL_OSCURO, COLORES_SUAVES, color, dibujar_costes, dibujar_curva_selector,
                        dibujar_maximos)
 
 GRIS = colors.HexColor("#D9D9D9")
@@ -247,11 +247,13 @@ def _tabla_coste_mensual(estudio, escenarios):
     return t
 
 
-def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anexos=True):
+def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anexos=True, seleccion_curva=(0, None)):
     """
     datos: dict con titular, cups, tarifa, instalacion, direccion, zona, fecha.
     escenarios: [Actual, Propuesta 1, ...] (calculo.Escenario).
     curva: potencia.lector_curva.CurvaCargada (para las notas).
+    seleccion_curva: (periodo, mes) del gráfico de la curva, igual que el selector de la interfaz
+                     (periodo 0 = todos; mes None = año completo).
     """
     doc = SimpleDocTemplate(str(ruta), pagesize=landscape(A4), leftMargin=10 * mm, rightMargin=10 * mm,
                             topMargin=8 * mm, bottomMargin=8 * mm,
@@ -308,7 +310,8 @@ def generar_pdf(ruta, datos, estudio, escenarios, curva, normativa, incluir_anex
                      Paragraph("T. Fijo: término de potencia contratada (peajes + cargos). T. Excesos: facturación por "
                                "excesos de potencia cuartohorarios (art. 9 de la Circular 3/2020).", _E["pie"])]
         historia += [PageBreak(), _cabecera(datos, "ANEXO: Curva de carga"), Spacer(1, 2 * mm),
-                     _figura_png(dibujar_curva_paneles, 275, 105, estudio, escenarios), Spacer(1, 1 * mm),
+                     _figura_png(dibujar_curva_selector, 275, 105, estudio, escenarios, *seleccion_curva),
+                     Spacer(1, 1 * mm),
                      _figura_png(dibujar_maximos, 275, 62, estudio, escenarios[0].pc)]
 
     doc.build(historia)

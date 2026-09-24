@@ -8,8 +8,8 @@ suministro eléctrico con peaje **6.1TD** o **3.0TD > 50 kW**, calcula:
 - Cualquier otra combinación de potencias que se quiera comparar (Propuesta 2, 3, …, editables con el botón
   **Calcular**; el desplegable **➕ Propuestas** añade más).
 - El ahorro anual, la inversión en derechos de acometida/enganche y el periodo de retorno simple (PRS).
-- Anexos: energía y potencias máximas por mes y periodo; detalle de costes (término fijo, excesos y total, con
-  desglose por periodos); curva de carga en 6 paneles (uno por periodo) y curva con selector de periodo y mes.
+- Anexos: energía y potencias máximas por mes y periodo; detalle de costes (fijo por periodo, total fijo, excesos
+  por periodo, total excesos y TOTAL); curva de carga con selector de periodo y mes (el PDF usa la misma selección).
 - Exportación a **PDF** con el logotipo de GE&PE (los anexos incluyen el coste mensual fijo/excesos/total por escenario).
 
 ## Instalación y uso

@@ -14,7 +14,7 @@ from .calculo import (N_P, Estudio, Tarifa, cargar_precios, evaluar, fmt, fmt_po
                       opciones_inversion_defecto, ruta_recurso, texto_conceptos, validar_potencias)
 from .calendario import ZONAS
 from .graficos import (AZUL_BOTON, AZUL_OSCURO, COLORES_SUAVES, ROJO_GEYPE, color, dibujar_costes,
-                       dibujar_curva_paneles, dibujar_curva_selector, dibujar_maximos)
+                       dibujar_curva_selector, dibujar_maximos)
 from .lector_curva import CONVENIOS, UNIDADES, LectorCurva
 
 TARIFAS = ["6.1TD", "3.0TD"]
@@ -538,7 +538,7 @@ class App(tk.Tk):
         self.combo_det = ttk.Combobox(sup, textvariable=self.v_det, state="readonly", width=20)
         self.combo_det.pack(side="left", padx=6)
         self.combo_det.bind("<<ComboboxSelected>>", lambda e: self._mostrar_detalle())
-        ttk.Label(sup, text="Importes en € sin impuesto eléctrico. Desglose por periodos a la derecha.",
+        ttk.Label(sup, text="Importes en € sin impuesto eléctrico.",
                   foreground="#666666").pack(side="left", padx=15)
         self.tabla_det = self._tabla(marco_det, height=16)
         barra_h = ttk.Scrollbar(marco_det, orient="horizontal", command=self.tabla_det.xview)
@@ -546,14 +546,8 @@ class App(tk.Tk):
         self.tabla_det.pack(fill="both", expand=True, padx=6)
         barra_h.pack(fill="x", padx=6, pady=(0, 6))
 
-        marco_pan = ttk.Frame(self.nb)
-        self.nb.add(marco_pan, text="Anexo: Curva por periodos")
-        self.fig_paneles = Figure(figsize=(5, 3), dpi=100, layout="constrained")
-        self.canvas_paneles = FigureCanvasTkAgg(self.fig_paneles, marco_pan)
-        self.canvas_paneles.get_tk_widget().pack(fill="both", expand=True)
-
         marco_sel = ttk.Frame(self.nb)
-        self.nb.add(marco_sel, text="Anexo: Curva (selector)")
+        self.nb.add(marco_sel, text="Anexo: Curva de carga")
         filtros = ttk.Frame(marco_sel)
         filtros.pack(fill="x", padx=6, pady=6)
         ttk.Label(filtros, text="Periodo:").pack(side="left")
@@ -569,7 +563,8 @@ class App(tk.Tk):
         self.combo_sel_mes.bind("<<ComboboxSelected>>", lambda e: self._redibujar_selector())
         ttk.Label(filtros, foreground="#666666",
                   text="Con «Todos», la línea de cada escenario es la potencia contratada del periodo de cada "
-                       "cuarto de hora (elige un mes para verlo con claridad).").pack(side="left", padx=15)
+                       "cuarto de hora (elige un mes para verlo con claridad). El PDF incluye esta misma "
+                       "selección.").pack(side="left", padx=15)
         self.fig_curva = Figure(figsize=(5, 3), dpi=100, layout="constrained")
         self.canvas_curva = FigureCanvasTkAgg(self.fig_curva, marco_sel)
         self.canvas_curva.get_tk_widget().pack(fill="both", expand=True)
@@ -588,9 +583,7 @@ class App(tk.Tk):
                         lambda: dibujar_costes(self.fig_costes, self.estudio, self.escenarios)),
                     2: ("max", self.fig_max, self.canvas_max,
                         lambda: dibujar_maximos(self.fig_max, self.estudio, self.escenarios[0].pc)),
-                    4: ("paneles", self.fig_paneles, self.canvas_paneles,
-                        lambda: dibujar_curva_paneles(self.fig_paneles, self.estudio, self.escenarios)),
-                    5: ("curva", self.fig_curva, self.canvas_curva, self._dibujar_selector)}
+                    4: ("curva", self.fig_curva, self.canvas_curva, self._dibujar_selector)}
         if pestana not in graficos or graficos[pestana][0] not in self._pendientes:
             return
         clave, fig, canvas, dibujar = graficos[pestana]
@@ -602,12 +595,16 @@ class App(tk.Tk):
         canvas.draw()
         self._pendientes.discard(clave)
 
-    def _dibujar_selector(self):
+    def _seleccion_curva(self):
+        """(periodo, mes) elegidos en el selector: periodo 0 = todos; mes None = año completo."""
         per = self.v_sel_periodo.get()
         periodo = 0 if per == "Todos" else int(per[1])
         meses = self.estudio.etiquetas_meses
         mes = meses.index(self.v_sel_mes.get()) if self.v_sel_mes.get() in meses else None
-        dibujar_curva_selector(self.fig_curva, self.estudio, self.escenarios, periodo, mes)
+        return periodo, mes
+
+    def _dibujar_selector(self):
+        dibujar_curva_selector(self.fig_curva, self.estudio, self.escenarios, *self._seleccion_curva())
 
     def _redibujar_selector(self):
         self._pendientes.add("curva")
@@ -845,7 +842,7 @@ class App(tk.Tk):
         self.combo_sel_mes.configure(values=["Año completo"] + est.etiquetas_meses)
         if self.v_sel_mes.get() not in ["Año completo"] + est.etiquetas_meses:
             self.v_sel_mes.set("Año completo")
-        self._pendientes = {"costes", "max", "paneles", "curva"}
+        self._pendientes = {"costes", "max", "curva"}
         self._dibujar_pendientes()
 
     def _mostrar_detalle(self):
@@ -854,14 +851,15 @@ class App(tk.Tk):
         esc = next((e for e in self.escenarios if e.nombre == self.v_det.get()), self.escenarios[0])
         est = self.estudio
         c = esc.coste
-        cols = ["Mes", "Días", "Total fijo", "Total excesos", "TOTAL"] +             [f"Fijo P{i}" for i in range(1, 7)] + [f"Exceso P{i}" for i in range(1, 7)]
+        cols = (["Mes", "Días"] + [f"Fijo P{i}" for i in range(1, 7)] + ["Total fijo"] +
+                [f"Exceso P{i}" for i in range(1, 7)] + ["Total excesos", "TOTAL"])
         filas = []
         for i, m in enumerate(est.etiquetas_meses):
-            filas.append([m, est.dias_mes[i], fmt(c.fijo[i].sum(), 2), fmt(c.exceso[i].sum(), 2),
-                          fmt(c.total_mes[i], 2)] + [fmt(v, 2) for v in c.fijo[i]] + [fmt(v, 2) for v in c.exceso[i]])
-        filas.append(["Total", est.dias_totales, fmt(c.total_fijo, 2), fmt(c.total_exceso, 2), fmt(c.total, 2)] +
-                     [fmt(v, 2) for v in c.fijo.sum(0)] + [fmt(v, 2) for v in c.exceso.sum(0)])
-        anchos = [60, 40, 92, 104, 92] + [66] * 12
+            filas.append([m, est.dias_mes[i]] + [fmt(v, 2) for v in c.fijo[i]] + [fmt(c.fijo[i].sum(), 2)] +
+                         [fmt(v, 2) for v in c.exceso[i]] + [fmt(c.exceso[i].sum(), 2), fmt(c.total_mes[i], 2)])
+        filas.append(["Total", est.dias_totales] + [fmt(v, 2) for v in c.fijo.sum(0)] + [fmt(c.total_fijo, 2)] +
+                     [fmt(v, 2) for v in c.exceso.sum(0)] + [fmt(c.total_exceso, 2), fmt(c.total, 2)])
+        anchos = [54, 34] + [60] * 6 + [84] + [72] * 6 + [98, 84]
         self._rellenar(self.tabla_det, cols, filas, [int(x * self._escala()) for x in anchos], totales=1)
 
     # ------------------------------------------------------------------ PDF
@@ -884,7 +882,7 @@ class App(tk.Tk):
         self.update_idletasks()
         try:
             generar_pdf(ruta, d, self.estudio, self.escenarios, self.curva, self.precios.get("normativa", []),
-                        incluir_anexos=anexos)
+                        incluir_anexos=anexos, seleccion_curva=self._seleccion_curva())
         except PermissionError:
             messagebox.showerror("Error", "No se puede escribir el PDF. ¿Está abierto en otro programa?")
             return

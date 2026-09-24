@@ -72,40 +72,6 @@ def _leyenda_escenarios(escenarios, con_exceso=True, demanda_linea=False):
     return h
 
 
-def dibujar_curva_paneles(fig, estudio, escenarios, titulo="Potencia demandada frente a potencias contratadas, por periodo"):
-    """Un panel por periodo: cuartos de hora de ese periodo y la potencia de cada escenario."""
-    fig.clear()
-    axs = fig.subplots(2, 3, sharex=True)
-    t = estudio.curva["inicio"].to_numpy()
-    actual = escenarios[0].pc
-    for p, ax in enumerate(axs.flat):
-        m = estudio.periodo == p + 1
-        tp, kp = t[m], estudio.kw[m]
-        exceso = kp > actual[p]
-        ax.scatter(tp[~exceso], kp[~exceso], s=1.2, color=COLOR_DEMANDA, lw=0, rasterized=True)
-        ax.scatter(tp[exceso], kp[exceso], s=2.5, color=COLOR_EXCESO, lw=0, rasterized=True)
-        tope = max([kp.max() if len(kp) else 0] + [e.pc[p] for e in escenarios])
-        for i, esc in enumerate(escenarios):
-            ax.axhline(esc.pc[p], color=color(i), lw=1.6, ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)])
-            ax.text(1.01, esc.pc[p], fmt(esc.pc[p]), transform=ax.get_yaxis_transform(), color=color(i),
-                    fontsize=6.5, va="center", fontweight="bold")
-        ax.set_ylim(0, tope * 1.1 if tope else 1)
-        n_exc = int(exceso.sum())
-        maximo = fmt(kp.max()) if len(kp) else "-"
-        ax.set_title(f"P{p + 1}  ·  máx. {maximo} kW", fontsize=8.5, fontweight="bold", loc="left")
-        ax.set_title(f"{fmt(n_exc)} cuartos con exceso (actual)", fontsize=7, loc="right",
-                     color=COLOR_EXCESO if n_exc else "#555555")
-        ax.tick_params(axis="y", labelsize=7)
-        _formato_meses(ax, 6)
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-        _ejes_limpios(ax)
-        if p % 3 == 0:
-            ax.set_ylabel("kW", fontsize=8)
-    fig.suptitle(titulo, fontsize=10, fontweight="bold")
-    fig.legend(handles=_leyenda_escenarios(escenarios), loc="outside lower center",
-               ncol=min(len(escenarios) + 2, 4), fontsize=7, frameon=False)
-
-
 def dibujar_curva_selector(fig, estudio, escenarios, periodo=0, mes=None,
                            titulo="Curva de carga y potencias contratadas"):
     """
