@@ -77,7 +77,18 @@ class SelectorZona(tk.Toplevel):
                   foreground="#555555", justify="center").pack(pady=10)
         boton(self, "Continuar", self._aceptar, ancho=18, alto=1).pack(pady=(5, 0))
         self.protocol("WM_DELETE_WINDOW", self.destroy)
-        self.transient(padre)
+        # si la ventana principal aún está oculta, un diálogo "transient" tampoco se mostraría
+        if padre.winfo_viewable():
+            self.transient(padre)
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() - self.winfo_reqwidth()) // 2
+        y = (self.winfo_screenheight() - self.winfo_reqheight()) // 3
+        self.geometry(f"+{x}+{y}")
+        self.deiconify()
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(300, lambda: self.attributes("-topmost", False))
+        self.focus_force()
         self.grab_set()
         self.bind("<Return>", lambda e: self._aceptar())
 
