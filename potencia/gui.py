@@ -62,6 +62,36 @@ class MarcoDesplazable(ttk.Frame):
 # diálogos
 # --------------------------------------------------------------------------
 
+class TablaColores(tk.Frame):
+    """Tabla de etiquetas con color de fondo por columna (el Treeview solo colorea filas)."""
+
+    FONDOS = ("white", "#F4F7FB")
+    FONDO_TOTAL = "#DCE6F1"
+
+    def __init__(self, padre):
+        super().__init__(padre, bg="white")
+
+    def rellenar(self, columnas, filas, anchos, colores=None):
+        """colores: {índice de columna: (fondo de las filas, fondo de la fila de totales)}."""
+        colores = colores or {}
+        for w in self.winfo_children():
+            w.destroy()
+        for j, c in enumerate(columnas):
+            tk.Label(self, text=c, bg=AZUL_OSCURO, fg="white", font=("Arial", 8, "bold"), width=anchos[j],
+                     pady=4).grid(row=0, column=j, sticky="nsew", padx=(0, 1), pady=(0, 1))
+        for i, fila in enumerate(filas):
+            total = i == len(filas) - 1
+            for j, v in enumerate(fila):
+                if j in colores:
+                    fondo = colores[j][1 if total else 0]
+                else:
+                    fondo = self.FONDO_TOTAL if total else self.FONDOS[i % 2]
+                negrita = total or j in colores or j == 0
+                tk.Label(self, text=v, bg=fondo, font=("Arial", 8, "bold") if negrita else ("Arial", 8),
+                         width=anchos[j], anchor="center" if j < 2 else "e", padx=2, pady=3).grid(row=i + 1, column=j,
+                                                                                  sticky="nsew", padx=(0, 1))
+
+
 class SelectorZona(tk.Toplevel):
     def __init__(self, padre, zona_actual=None):
         super().__init__(padre)
@@ -540,11 +570,8 @@ class App(tk.Tk):
         self.combo_det.bind("<<ComboboxSelected>>", lambda e: self._mostrar_detalle())
         ttk.Label(sup, text="Importes en € sin impuesto eléctrico.",
                   foreground="#666666").pack(side="left", padx=15)
-        self.tabla_det = self._tabla(marco_det, height=16)
-        barra_h = ttk.Scrollbar(marco_det, orient="horizontal", command=self.tabla_det.xview)
-        self.tabla_det.configure(xscrollcommand=barra_h.set)
-        self.tabla_det.pack(fill="both", expand=True, padx=6)
-        barra_h.pack(fill="x", padx=6, pady=(0, 6))
+        self.tabla_det = TablaColores(marco_det)
+        self.tabla_det.pack(fill="both", expand=True, padx=6, pady=(0, 6))
 
         marco_sel = ttk.Frame(self.nb)
         self.nb.add(marco_sel, text="Anexo: Curva de carga")
@@ -859,8 +886,10 @@ class App(tk.Tk):
                          [fmt(v, 2) for v in c.exceso[i]] + [fmt(c.exceso[i].sum(), 2), fmt(c.total_mes[i], 2)])
         filas.append(["Total", est.dias_totales] + [fmt(v, 2) for v in c.fijo.sum(0)] + [fmt(c.total_fijo, 2)] +
                      [fmt(v, 2) for v in c.exceso.sum(0)] + [fmt(c.total_exceso, 2), fmt(c.total, 2)])
-        anchos = [54, 34] + [60] * 6 + [84] + [72] * 6 + [98, 84]
-        self._rellenar(self.tabla_det, cols, filas, [int(x * self._escala()) for x in anchos], totales=1)
+        anchos = [7, 4] + [8] * 6 + [10] + [9] * 6 + [12, 10]     # en caracteres
+        # columnas de totales con colores suaves distintos: total fijo, total excesos y TOTAL
+        colores = {8: ("#FFF7DC", "#FBE7A8"), 15: ("#FDE9E7", "#F6C9C4"), 16: ("#E3EEF9", "#BFD7EE")}
+        self.tabla_det.rellenar(cols, filas, anchos, colores)
 
     # ------------------------------------------------------------------ PDF
     def exportar_pdf(self):

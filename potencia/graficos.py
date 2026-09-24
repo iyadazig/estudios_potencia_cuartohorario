@@ -40,7 +40,7 @@ def dibujar_costes(fig, estudio, escenarios, titulo="Coste de la potencia factur
 
 ESTILOS_LINEA = ["-", (0, (6, 3)), (0, (2, 2)), (0, (6, 2, 2, 2)), (0, (10, 3)), (0, (1, 1)), (0, (4, 4))]
 COLOR_DEMANDA = "#9E9E9E"
-COLOR_EXCESO = "#C00000"
+COLOR_EXCESO = "#E00000"
 # fondo suave de cada periodo (P1 más oscuro -> P6 más claro)
 FONDO_PERIODO = ["#F4CCCC", "#FCE5CD", "#FFF2CC", "#D9EAD3", "#CFE2F3", "#EEEEEE"]
 
@@ -72,6 +72,15 @@ def _leyenda_escenarios(escenarios, con_exceso=True, demanda_linea=False):
     return h
 
 
+def _marcar_excesos(ax, t, y, lim, puntos, escalon=False):
+    """Relleno rojo intenso del exceso sobre la potencia actual y, con escala anual, un punto por cuarto de hora."""
+    exceso = np.nan_to_num(y, nan=-np.inf) > lim
+    ax.fill_between(t, lim, y, where=exceso, color=COLOR_EXCESO, alpha=0.95, lw=0.6, edgecolor=COLOR_EXCESO,
+                    step="post" if escalon else None, interpolate=not escalon, zorder=5)
+    if puntos and exceso.any():
+        ax.scatter(t[exceso], y[exceso], s=7, color=COLOR_EXCESO, lw=0, zorder=6)
+
+
 def dibujar_curva_selector(fig, estudio, escenarios, periodo=0, mes=None,
                            titulo="Curva de carga y potencias contratadas"):
     """
@@ -89,12 +98,13 @@ def dibujar_curva_selector(fig, estudio, escenarios, periodo=0, mes=None,
     if periodo:
         y = np.where(per == periodo, kw, np.nan)
         lim = actual[periodo - 1]
-        ax.plot(t, y, color=COLOR_DEMANDA, lw=0.7)
-        ax.fill_between(t, lim, y, where=y > lim, color=COLOR_EXCESO, alpha=0.6, lw=0, interpolate=True)
         for i, esc in enumerate(escenarios):
-            ax.axhline(esc.pc[periodo - 1], color=color(i), lw=1.6, ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)])
+            ax.axhline(esc.pc[periodo - 1], color=color(i), lw=1.6, ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)],
+                       zorder=2)
             ax.text(1.005, esc.pc[periodo - 1], fmt(esc.pc[periodo - 1]), transform=ax.get_yaxis_transform(),
                     color=color(i), fontsize=7, va="center", fontweight="bold")
+        ax.plot(t, y, color="#707070", lw=0.7, zorder=3)
+        _marcar_excesos(ax, t, y, np.full(len(t), lim), mes is None)
         tope = max([np.nanmax(y) if np.isfinite(y).any() else 0] + [e.pc[periodo - 1] for e in escenarios])
     else:
         if mes is not None:
@@ -106,11 +116,13 @@ def dibujar_curva_selector(fig, estudio, escenarios, periodo=0, mes=None,
             for a, b in zip(ini, fin):
                 ax.axvspan(t[a], t[b - 1] + paso, color=FONDO_PERIODO[per[a] - 1], lw=0, zorder=0)
         lim = actual[per - 1]
-        ax.plot(t, kw, color="#707070", lw=0.6, zorder=2)
-        ax.fill_between(t, lim, kw, where=kw > lim, color=COLOR_EXCESO, alpha=0.6, lw=0, step="post", zorder=3)
+        # con el año completo las potencias saltan en cada cambio de periodo: líneas suaves, detrás
+        suave = mes is None
         for i, esc in enumerate(escenarios):
-            ax.plot(t, esc.pc[per - 1], color=color(i), lw=1.4, drawstyle="steps-post",
-                    ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)], zorder=4)
+            ax.plot(t, esc.pc[per - 1], color=color(i), lw=0.8 if suave else 1.4, drawstyle="steps-post",
+                    ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)], alpha=0.35 if suave else 1, zorder=2)
+        ax.plot(t, kw, color="#707070", lw=0.6, zorder=3)
+        _marcar_excesos(ax, t, kw, lim, suave, escalon=True)
         tope = max(kw.max() if len(kw) else 0, max(e.pc.max() for e in escenarios))
 
     ax.set_ylim(0, tope * 1.08 if tope else 1)
@@ -129,7 +141,7 @@ def dibujar_curva_selector(fig, estudio, escenarios, periodo=0, mes=None,
     ax.set_title(f"{titulo} – {texto_p} – {texto_m}", fontsize=10, fontweight="bold")
     handles = _leyenda_escenarios(escenarios, con_exceso=False, demanda_linea=True)
     from matplotlib.patches import Patch
-    handles.insert(1, Patch(color=COLOR_EXCESO, alpha=0.6, label="Exceso sobre la potencia actual"))
+    handles.insert(1, Patch(color=COLOR_EXCESO, label="Exceso sobre la potencia actual"))
     if not periodo and mes is not None:
         handles += [Patch(color=FONDO_PERIODO[k], label=f"P{k + 1}") for k in range(6)]
     ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.12 if mes is None else -0.16),
