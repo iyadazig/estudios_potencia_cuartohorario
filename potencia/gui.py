@@ -1199,7 +1199,7 @@ class App(tk.Tk):
                               fmt(f["optima"]), fmt(f["ahorro"]), f"{fmt(100 * f['pct'], 1)} %",
                               fmt(f["inversion"], 2) if f["inversion"] else "-",
                               fmt(f["prs"], 2) if f["prs"] is not None else "-"])
-            act, opt = r.escenarios
+            act, opt = r.escenarios[:2]
             filas.append(["", "TOTAL", "", "", "", fmt(act.coste.total), fmt(opt.coste.total), fmt(opt.ahorro),
                           f"{fmt(100 * opt.ahorro_pct, 1)} %",
                           fmt(opt.inversion["total"], 2) if opt.inversion["total"] else "-",

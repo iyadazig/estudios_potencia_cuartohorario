@@ -19,14 +19,24 @@ def color(i):
     return COLORES[i % len(COLORES)]
 
 
-def dibujar_costes(fig, estudio, escenarios, titulo="Coste de la potencia facturada (€)"):
+def dibujar_costes(fig, estudio, escenarios, titulo="Coste de la potencia facturada (€)", ncol=None):
     fig.clear()
     ax = fig.add_subplot(111)
     x = np.arange(len(estudio.meses))
+    # las propuestas suelen ir casi superpuestas: cada una con su trazo y su marcador, y por encima de la actual
+    marcadores = ["o", "s", "^", "D", "v", "P", "X"]
     for i, esc in enumerate(escenarios):
-        ax.plot(x, esc.coste.total_mes, color=color(i), lw=2, label=esc.nombre)
+        if i == 0:
+            ax.plot(x, esc.coste.total_mes, color=color(i), lw=2.2, label=esc.nombre, zorder=2)
+        else:
+            ax.plot(x, esc.coste.total_mes, color=color(i), lw=2.4, ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)],
+                    marker=marcadores[(i - 1) % len(marcadores)], ms=4.5, markeredgecolor="white",
+                    markeredgewidth=0.6, label=esc.nombre, zorder=2 + i)
     ax.set_xticks(x)
-    ax.set_xticklabels(estudio.etiquetas_meses, fontsize=7, rotation=0)
+    # si no caben en horizontal (gráfico estrecho), las etiquetas de los meses se inclinan
+    estrecho = fig.get_figwidth() / max(len(x), 1) < 0.42
+    ax.set_xticklabels(estudio.etiquetas_meses, fontsize=7, rotation=45 if estrecho else 0,
+                       ha="right" if estrecho else "center", rotation_mode="anchor")
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{fmt(v)} €"))
     ax.tick_params(axis="y", labelsize=7)
     ax.set_ylim(bottom=0)
@@ -34,7 +44,7 @@ def dibujar_costes(fig, estudio, escenarios, titulo="Coste de la potencia factur
     for lado in ("top", "right", "left"):
         ax.spines[lado].set_visible(False)
     ax.set_title(titulo, fontsize=10, fontweight="bold", color="#222222")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=min(len(escenarios), 4),
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24 if estrecho else -0.1), ncol=ncol or min(len(escenarios), 4),
               fontsize=7, frameon=False)
 
 
@@ -67,7 +77,7 @@ def _leyenda_escenarios(escenarios, con_exceso=True, demanda_linea=False):
     if con_exceso:
         h.append(Line2D([], [], color=COLOR_EXCESO, marker="o", ls="", ms=4,
                         label="Cuartos de hora que superan la potencia actual"))
-    h += [Line2D([], [], color=color(i), lw=1.8, ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)],
+    h += [Line2D([], [], color=color(i), lw=1.8 if i == 0 else 2.4, ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)],
                  label=f"Potencia contratada – {e.nombre}") for i, e in enumerate(escenarios)]
     return h
 
@@ -99,8 +109,8 @@ def dibujar_curva_selector(fig, estudio, escenarios, periodo=0, mes=None,
         y = np.where(per == periodo, kw, np.nan)
         lim = actual[periodo - 1]
         for i, esc in enumerate(escenarios):
-            ax.axhline(esc.pc[periodo - 1], color=color(i), lw=1.6, ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)],
-                       zorder=2)
+            ax.axhline(esc.pc[periodo - 1], color=color(i), lw=1.8 if i == 0 else 2.4,
+                       ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)], zorder=4 + i)
             ax.text(1.005, esc.pc[periodo - 1], fmt(esc.pc[periodo - 1]), transform=ax.get_yaxis_transform(),
                     color=color(i), fontsize=7, va="center", fontweight="bold")
         ax.plot(t, y, color="#707070", lw=0.7, zorder=3)
@@ -116,13 +126,20 @@ def dibujar_curva_selector(fig, estudio, escenarios, periodo=0, mes=None,
             for a, b in zip(ini, fin):
                 ax.axvspan(t[a], t[b - 1] + paso, color=FONDO_PERIODO[per[a] - 1], lw=0, zorder=0)
         lim = actual[per - 1]
-        # con el año completo las potencias saltan en cada cambio de periodo: líneas suaves, detrás
-        suave = mes is None
+        anual = mes is None
+        # con el año completo la potencia contratada salta en cada cambio de periodo: se quitan los trazos
+        # verticales (cada potencia queda como una banda horizontal a su nivel) para que no formen bloques
+        cortes = np.r_[False, per[1:] != per[:-1]]
+        ax.plot(t, kw, color="#8C8C8C", lw=0.5, zorder=2)
         for i, esc in enumerate(escenarios):
-            ax.plot(t, esc.pc[per - 1], color=color(i), lw=0.8 if suave else 1.4, drawstyle="steps-post",
-                    ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)], alpha=0.35 if suave else 1, zorder=2)
-        ax.plot(t, kw, color="#707070", lw=0.6, zorder=3)
-        _marcar_excesos(ax, t, kw, lim, suave, escalon=True)
+            y = esc.pc[per - 1].astype(float)
+            estilo = dict(color=color(i), ls=ESTILOS_LINEA[i % len(ESTILOS_LINEA)], zorder=3 + i)
+            if anual:
+                y[cortes] = np.nan
+                ax.plot(t, y, lw=1.8 if i == 0 else 2.4, **estilo)
+            else:
+                ax.plot(t, y, lw=1.6 if i == 0 else 2.2, drawstyle="steps-post", **estilo)
+        _marcar_excesos(ax, t, kw, lim, anual, escalon=True)
         tope = max(kw.max() if len(kw) else 0, max(e.pc.max() for e in escenarios))
 
     ax.set_ylim(0, tope * 1.08 if tope else 1)

@@ -260,10 +260,12 @@ def evaluar(estudio, propuestas, pc_actual):
 
 class ResumenMultipunto:
     """
-    Suma de varios suministros (estudio multipunto): situación actual frente a la
-    propuesta óptima (Propuesta 1) de cada uno, mes a mes.
+    Suma de varios suministros (estudio multipunto), mes a mes: situación actual,
+    propuesta óptima (Propuesta 1) y resto de propuestas de cada uno.
+    La Propuesta k conjunta suma la Propuesta k de cada CUPS; los CUPS que no la tienen
+    entran con su situación actual (se listan en `sin_propuesta`).
     Imita la interfaz de Estudio que usan las tablas y gráficos (meses, etiquetas_meses,
-    dias_mes, dias_totales, energia_kwh) y expone `escenarios` = [Actual, Óptima].
+    dias_mes, dias_totales, energia_kwh) y expone `escenarios` = [Actual, Propuesta 1, ...].
     """
 
     def __init__(self, lista):
@@ -271,25 +273,32 @@ class ResumenMultipunto:
         self.meses = sorted(set().union(*(set(est.meses) for est, _ in lista)))
         pos = {m: i for i, m in enumerate(self.meses)}
         n = len(self.meses)
+        n_esc = max(len(escs) for _, escs in lista)
         self.dias_mes = np.zeros(n, dtype=int)
         self._energia = np.zeros((n, N_P))
-        fijo = np.zeros((2, n, N_P))
-        exceso = np.zeros((2, n, N_P))
-        inversion = 0.0
-        for est, escs in lista:
+        fijo = np.zeros((n_esc, n, N_P))
+        exceso = np.zeros((n_esc, n, N_P))
+        inversion = np.zeros(n_esc)
+        self.sin_propuesta = {}          # nº de propuesta -> índices de los CUPS que no la tienen
+        for j, (est, escs) in enumerate(lista):
             idx = [pos[m] for m in est.meses]
             self.dias_mes[idx] = np.maximum(self.dias_mes[idx], est.dias_mes)
             self._energia[idx] += est.energia_kwh()
-            for k in (0, 1):
-                fijo[k, idx] += escs[k].coste.fijo
-                exceso[k, idx] += escs[k].coste.exceso
-            inversion += escs[1].inversion.get("total", 0.0)
+            for k in range(n_esc):
+                e = escs[k] if k < len(escs) else escs[0]
+                if k >= len(escs):
+                    self.sin_propuesta.setdefault(k, []).append(j)
+                fijo[k, idx] += e.coste.fijo
+                exceso[k, idx] += e.coste.exceso
+                inversion[k] += e.inversion.get("total", 0.0)
         actual = Escenario("Actual", np.full(N_P, np.nan), Coste(fijo[0], exceso[0]))
-        c_opt = Coste(fijo[1], exceso[1])
-        ahorro = actual.coste.total - c_opt.total
-        pct = ahorro / actual.coste.total if actual.coste.total else 0.0
-        optima = Escenario("Óptima", np.full(N_P, np.nan), c_opt, {"total": inversion, "conceptos": []}, ahorro, pct)
-        self.escenarios = [actual, optima]
+        self.escenarios = [actual]
+        for k in range(1, n_esc):
+            c = Coste(fijo[k], exceso[k])
+            ahorro = actual.coste.total - c.total
+            pct = ahorro / actual.coste.total if actual.coste.total else 0.0
+            self.escenarios.append(Escenario(f"Propuesta {k}", np.full(N_P, np.nan), c,
+                                             {"total": float(inversion[k]), "conceptos": []}, ahorro, pct))
         self.periodos_distintos = len({tuple(est.meses) for est, _ in lista}) > 1
 
     @property
