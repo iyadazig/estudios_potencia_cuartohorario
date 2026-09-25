@@ -36,8 +36,40 @@ def comprobar(ruta_curva, ruta_pdf, tarifa="6.1TD", zona="Península"):
     return codigo
 
 
+def comprobar_gemweb(cups, ruta_txt):
+    """
+    Comprobación de la conexión con Gemweb (credenciales guardadas o variables GEMWEB_CLIENT_ID/SECRET):
+        EstudioPotencia.exe --prueba-gemweb CUPS resultado.txt
+    Descarga la última semana del CUPS y deja el resultado en resultado.txt.
+    """
+    from datetime import date, timedelta
+
+    from potencia import gemweb
+
+    try:
+        credenciales = gemweb.cargar_credenciales()
+        if not credenciales:
+            raise gemweb.GemwebError("No hay credenciales de Gemweb configuradas.")
+        cliente = gemweb.ClienteGemweb(*credenciales)
+        s = cliente.buscar_suministro(cups)
+        if s is None:
+            raise gemweb.GemwebError(f"{cups} no está en el inventario de Gemweb.")
+        hasta = date.today() - timedelta(days=30)
+        df, fallidos = cliente.descargar_curva(s["id"], hasta - timedelta(days=7), hasta)
+        lineas = ["OK", f"Suministro {s['id']} · {s.get('tarifa_acces')} · {s.get('nom')}",
+                  f"{len(df)} cuartos de hora descargados", *fallidos]
+        codigo = 0
+    except Exception as e:
+        lineas, codigo = ["ERROR", str(e)], 1
+    with open(ruta_txt, "w", encoding="utf-8") as f:
+        f.write("\n".join(lineas))
+    return codigo
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 4 and sys.argv[1] == "--prueba":
         sys.exit(comprobar(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) >= 4 and sys.argv[1] == "--prueba-gemweb":
+        sys.exit(comprobar_gemweb(sys.argv[2], sys.argv[3]))
     from potencia.gui import main
     main()

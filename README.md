@@ -40,6 +40,22 @@ En la ventana inicial se elige **Multipunto** para estudiar varios suministros a
 5. El PDF incluye la página de resumen conjunto y, a continuación, las páginas de cada CUPS (con sus anexos si se
    piden).
 
+## Descarga desde Gemweb
+
+El botón **🌐 Descargar de Gemweb…** descarga la curva cuartohoraria de los CUPS indicados directamente de la API
+de Gemweb (en multipunto, varios CUPS de una vez), sin tener que preparar ningún fichero:
+
+1. La primera vez se piden las credenciales de la API (Client ID y Client secret; se pueden importar del
+   `.streamlit/secrets.toml` del proyecto API_Gemweb). Se validan y se guardan en `%APPDATA%\EstudioPotencia` con la
+   clave cifrada para el usuario de Windows.
+2. Se indican los CUPS y el periodo (por defecto, los 12 últimos meses completos).
+3. Para cada CUPS se busca su id en el inventario de Gemweb y se descarga el consumo cuartohorario (kWh) en tramos
+   mensuales; el programa lo convierte a potencia como cualquier fichero de curva (hora de fin del cuarto).
+4. Opcionalmente se rellenan la **tarifa**, las **potencias contratadas**, la denominación, la dirección y (en
+   multipunto) la **zona** según el código postal, con los datos del inventario de Gemweb.
+5. Se avisa si Gemweb no tiene datos de todo el periodo o si el suministro tiene lectura **horaria** (los cuartos de
+   hora son entonces un reparto de la energía horaria).
+
 ## Ficheros de curva admitidos
 
 El lector (`potencia/lector_curva.py`) detecta automáticamente:
@@ -111,6 +127,8 @@ potencia/
   graficos.py              gráficos (interfaz y PDF)
   informe_pdf.py           informe PDF
   gui.py                   interfaz tkinter
+  gemweb.py                conexión con la API de Gemweb (inventario y telelecturas)
+  gui_gemweb.py            ventanas de credenciales y descarga de Gemweb
 tests/                     pruebas con curvas sintéticas en 6 formatos distintos
 ```
 
@@ -118,7 +136,7 @@ tests/                     pruebas con curvas sintéticas en 6 formatos distinto
 
 ```bash
 python -m venv .venv_exe
-.venv_exe\Scripts\python -m pip install numpy pandas matplotlib openpyxl xlrd reportlab pillow pyinstaller
+.venv_exe\Scripts\python -m pip install numpy pandas matplotlib openpyxl xlrd reportlab pillow requests pyinstaller
 .venv_exe\Scripts\python -m PyInstaller EstudioPotencia.spec --noconfirm
 ```
 

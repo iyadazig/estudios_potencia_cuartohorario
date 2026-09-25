@@ -2,7 +2,7 @@
 
 import os
 import tkinter as tk
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -770,6 +770,7 @@ class App(tk.Tk):
         curva = ttk.LabelFrame(izq, text="Curva de carga", padding=8)
         curva.pack(fill="x", pady=8)
         ttk.Button(curva, text="📂  Cargar curva de carga…", command=self.cargar_curva).pack(fill="x")
+        ttk.Button(curva, text="🌐  Descargar de Gemweb…", command=self.descargar_gemweb).pack(fill="x", pady=(4, 0))
         texto = ("Un único fichero con la curva de todos los CUPS (columna CUPS obligatoria)."
                  if self.multipunto else "Formatos: CSV, TXT, XLSX, XLS (cuartohoraria u horaria, kW o kWh).")
         self.lb_curva = ttk.Label(curva, text="Ninguna curva cargada.\n" + texto,
@@ -1071,14 +1072,16 @@ class App(tk.Tk):
         s.zona_curva = s.v_zona.get()
         s.invalidar()
 
-    def _cargar_individual(self, ruta, curva):
+    def _cargar_individual(self, ruta, curva, nombre=None):
         s = self.suministros[0]
         s.curva, s.zona_curva = curva, s.v_zona.get()
         s.invalidar()
         if curva.cups and not self.v_datos["cups"].get().strip():
             self.v_datos["cups"].set(curva.cups)
         tipo = "cuartohoraria" if curva.resolucion_min == 15 else "HORARIA (cuartos estimados)"
-        texto = (f"{Path(ruta).name}\n{curva.fecha_inicio:%d/%m/%Y} – "
+        if self.AVISO_HORARIA in curva.avisos:
+            tipo = "lectura HORARIA en Gemweb (cuartos estimados)"
+        texto = (f"{nombre or Path(ruta).name}\n{curva.fecha_inicio:%d/%m/%Y} – "
                  f"{(curva.fecha_fin - np.timedelta64(1, 'D')):%d/%m/%Y}  ·  {tipo}  ·  {curva.unidad}\n"
                  f"Potencia máxima: {fmt(curva.datos['kw'].max(), 1)} kW")
         if curva.avisos:
@@ -1089,7 +1092,7 @@ class App(tk.Tk):
         if all(_num(v.get()) for v in self.v_actual):
             self.calcular()
 
-    def _cargar_multipunto(self, ruta):
+    def _cargar_multipunto(self, ruta, nombre=None):
         cups = list(self.lector.cups_disponibles)
         self.config(cursor="watch")
         self.update_idletasks()
@@ -1114,12 +1117,108 @@ class App(tk.Tk):
         self._construir_bloques()
         self.combo_cups_anexo.configure(values=[TODOS] + [s.cups for s in nuevos])
         self.v_cups_anexo.set(TODOS)
-        self.lb_curva.config(foreground="black", text=f"{Path(ruta).name}\n{len(nuevos)} CUPS cargados"
+        self.lb_curva.config(foreground="black", text=f"{nombre or Path(ruta).name}\n{len(nuevos)} CUPS cargados"
                              + (f" ({len(errores)} con error)" if errores else "") +
                              ".\nRellena los datos de cada CUPS y pulsa CALCULAR.")
         self._escribir_log(errores)
         if errores:
             messagebox.showwarning("CUPS con error", "\n".join(errores))
+
+    # ------------------------------------------------------------------ Gemweb
+    AVISO_HORARIA = ("En Gemweb este suministro tiene lectura HORARIA: cada cuarto de hora es un reparto de la "
+                     "energía de su hora, así que los picos de 15 minutos no son reales y los excesos pueden ser mayores.")
+
+    def descargar_gemweb(self):
+        from . import gemweb
+        from .gui_gemweb import DialogoCredenciales, DialogoGemweb
+        credenciales = gemweb.cargar_credenciales()
+        if credenciales is None:
+            dlg = DialogoCredenciales(self)
+            self.wait_window(dlg)
+            if not dlg.ok:
+                return
+            credenciales = gemweb.cargar_credenciales()
+        inicial = "\n".join(s.cups for s in self.suministros if s.cups) if self.multipunto \
+            else self.v_datos["cups"].get().strip()
+        dlg = DialogoGemweb(self, credenciales, self.multipunto, inicial)
+        self.wait_window(dlg)
+        if dlg.resultado:
+            self.aplicar_descarga_gemweb(dlg.resultado)
+
+    def aplicar_descarga_gemweb(self, resultado):
+        """Carga en el estudio la curva descargada de Gemweb (y, si se pidió, los datos del contrato)."""
+        from . import gemweb
+        ruta, info, avisos, rellenar = resultado
+        try:
+            self.lector = LectorCurva(ruta)
+        except Exception as e:
+            messagebox.showerror("Error al leer la curva descargada", str(e))
+            return
+        self.ajustes_carga = {"unidad": UNIDADES[0], "convenio": "Fin de periodo", "hoja": None, "cups": None}
+        nombre = f"Gemweb · descargada el {datetime.now():%d/%m/%Y %H:%M}"
+
+        def avisos_de(cups, curva):
+            curva.avisos += [a for a in avisos if a.startswith(cups)]
+            if info[cups].get("_lectura_horaria"):
+                curva.avisos.append(self.AVISO_HORARIA)
+
+        if not self.multipunto:
+            cups, datos = next(iter(info.items()))
+            try:
+                curva = self.lector.procesar(self.zona, UNIDADES[0], "Fin de periodo", None, cups)
+            except Exception as e:
+                messagebox.showerror("Error al interpretar la curva", str(e))
+                return
+            avisos_de(cups, curva)
+            self.v_datos["cups"].set(cups)
+            if rellenar:
+                self._rellenar_desde_gemweb(datos, self.v_tarifa, self.v_actual)
+                self.v_datos["instalacion"].set(datos.get("nom") or "")
+                self.v_datos["direccion"].set(self._direccion_gemweb(datos))
+            self._cargar_individual(ruta, curva, nombre=nombre)
+            zona = gemweb.zona_por_codigo_postal(datos.get("codi_postal"))
+            if zona and zona != self.zona:
+                messagebox.showinfo("Zona", f"Según su código postal, el suministro está en {zona} y el estudio "
+                                    f"está en {self.zona}. Si es así, pulsa «Cambiar zona».")
+            return
+
+        try:
+            self.lector.procesar(self.zona, UNIDADES[0], "Fin de periodo")    # detecta los CUPS del fichero
+        except Exception as e:
+            messagebox.showerror("Error al interpretar la curva", str(e))
+            return
+        self._cargar_multipunto(ruta, nombre=nombre)
+        for s in self.suministros:
+            datos = info.get(s.cups)
+            if datos is None:
+                continue
+            avisos_de(s.cups, s.curva)
+            if rellenar:
+                self._rellenar_desde_gemweb(datos, s.v_tarifa, s.v_actual)
+                s.v_denominacion.set(datos.get("nom") or "")
+                s.v_direccion.set(self._direccion_gemweb(datos))
+                zona = gemweb.zona_por_codigo_postal(datos.get("codi_postal"))
+                if zona:
+                    s.v_zona.set(zona)      # al calcular se vuelve a leer la curva con esa zona
+        self._escribir_log()
+        if rellenar and all(all(_num(v.get()) for v in s.v_actual) for s in self.suministros):
+            self.calcular()
+
+    @staticmethod
+    def _direccion_gemweb(datos):
+        partes = [datos.get("direccio"), " ".join(x for x in (datos.get("codi_postal"), datos.get("poblacio")) if x)]
+        return ", ".join(x.strip() for x in partes if x and x.strip())
+
+    @staticmethod
+    def _rellenar_desde_gemweb(datos, v_tarifa, v_actual):
+        from .gemweb import numero
+        tarifa = (datos.get("tarifa_acces") or "").strip()
+        if tarifa in TARIFAS:
+            v_tarifa.set(tarifa)
+        potencias = [numero(datos.get(f"pot_contract_p{k}")) for k in range(1, 7)]
+        if all(p and p > 0 for p in potencias):
+            for v, pot in zip(v_actual, potencias):
+                v.set(f"{pot:g}".replace(".", ","))
 
     def _escribir_log(self, errores=()):
         self.txt_log.delete("1.0", "end")
