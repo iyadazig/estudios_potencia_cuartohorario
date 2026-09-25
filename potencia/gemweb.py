@@ -76,8 +76,8 @@ def guardar_credenciales(client_id, client_secret):
     ruta.write_text(json.dumps({"client_id": client_id, "client_secret": secreto}), encoding="utf-8")
 
 
-def cargar_credenciales():
-    """(client_id, client_secret) o None si no están configuradas."""
+def credenciales_propias():
+    """Credenciales del propio usuario (variables de entorno o guardadas en su perfil) o None."""
     if os.environ.get("GEMWEB_CLIENT_ID") and os.environ.get("GEMWEB_CLIENT_SECRET"):
         return os.environ["GEMWEB_CLIENT_ID"], os.environ["GEMWEB_CLIENT_SECRET"]
     ruta = _ruta_credenciales()
@@ -90,6 +90,42 @@ def cargar_credenciales():
         return d["client_id"], secreto
     except Exception:
         return None
+
+
+def credenciales_incluidas():
+    """
+    Credenciales de GE&PE incluidas en el ejecutable al compilarlo con construir_exe.py
+    (módulo generado _credenciales_incluidas.py, excluido de git). None si no las hay.
+    """
+    try:
+        from ._credenciales_incluidas import obtener
+        return obtener()
+    except Exception:
+        return None
+
+
+def cargar_credenciales():
+    """(client_id, client_secret): las propias del usuario o, si no tiene, las incluidas en el ejecutable."""
+    return credenciales_propias() or credenciales_incluidas()
+
+
+def usa_credenciales_incluidas():
+    return credenciales_propias() is None and credenciales_incluidas() is not None
+
+
+def ofuscar(client_id, client_secret):
+    """Código fuente del módulo _credenciales_incluidas.py (datos ofuscados, no en texto plano)."""
+    clave = os.urandom(32)
+    datos = json.dumps([client_id, client_secret]).encode("utf-8")
+    mezcla = bytes(b ^ clave[i % len(clave)] for i, b in enumerate(datos))
+    return ('"""Generado por construir_exe.py al compilar el ejecutable. NO SUBIR A GIT (está en .gitignore)."""\n\n'
+            f'_K = "{base64.b64encode(clave).decode()}"\n'
+            f'_D = "{base64.b64encode(mezcla).decode()}"\n\n\n'
+            'def obtener():\n'
+            '    import base64\n'
+            '    import json\n'
+            '    k, d = base64.b64decode(_K), base64.b64decode(_D)\n'
+            '    return tuple(json.loads(bytes(b ^ k[i % len(k)] for i, b in enumerate(d)).decode("utf-8")))\n')
 
 
 def leer_secrets_toml(ruta):

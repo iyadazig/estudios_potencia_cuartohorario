@@ -20,3 +20,8 @@ informes/
 *.csv
 *.txt
 !requirements.txt
+!LEEME_exe.txt
+
+# credenciales de Gemweb que construir_exe.py mete en el ejecutable: NUNCA en git
+potencia/_credenciales_incluidas.py
+credenciales_gemweb.toml

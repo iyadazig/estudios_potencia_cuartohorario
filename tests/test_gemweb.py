@@ -87,8 +87,26 @@ def test_credenciales_cifradas(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.delenv("GEMWEB_CLIENT_ID", raising=False)
     monkeypatch.delenv("GEMWEB_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(gemweb, "credenciales_incluidas", lambda: None)
     assert gemweb.cargar_credenciales() is None
     gemweb.guardar_credenciales("usuarioAPI", "secreto-123")
     guardado = (tmp_path / "EstudioPotencia" / "gemweb.json").read_text(encoding="utf-8")
     assert "secreto-123" not in guardado
     assert gemweb.cargar_credenciales() == ("usuarioAPI", "secreto-123")
+
+
+def test_credenciales_incluidas_ofuscadas(tmp_path, monkeypatch):
+    fuente = gemweb.ofuscar("usuarioAPI", "secreto-123")
+    assert "secreto-123" not in fuente and "usuarioAPI" not in fuente
+    espacio = {}
+    exec(fuente, espacio)
+    assert espacio["obtener"]() == ("usuarioAPI", "secreto-123")
+    # sin credenciales propias se usan las incluidas; con propias, mandan las propias
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.delenv("GEMWEB_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GEMWEB_CLIENT_SECRET", raising=False)
+    monkeypatch.setattr(gemweb, "credenciales_incluidas", espacio["obtener"])
+    assert gemweb.cargar_credenciales() == ("usuarioAPI", "secreto-123") and gemweb.usa_credenciales_incluidas()
+    monkeypatch.setenv("GEMWEB_CLIENT_ID", "otro")
+    monkeypatch.setenv("GEMWEB_CLIENT_SECRET", "otra-clave")
+    assert gemweb.cargar_credenciales() == ("otro", "otra-clave") and not gemweb.usa_credenciales_incluidas()

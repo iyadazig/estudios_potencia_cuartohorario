@@ -137,13 +137,22 @@ tests/                     pruebas con curvas sintéticas en 6 formatos distinto
 ```bash
 python -m venv .venv_exe
 .venv_exe\Scripts\python -m pip install numpy pandas matplotlib openpyxl xlrd reportlab pillow requests pyinstaller
-.venv_exe\Scripts\python -m PyInstaller EstudioPotencia.spec --noconfirm
+.venv_exe\Scripts\python construir_exe.py
 ```
 
-Se genera `dist/EstudioPotencia.exe` (unos 50 MB; conviene compilar desde un entorno limpio y no desde Anaconda, que
-da un ejecutable de más de 200 MB). Junto al `.exe` se copia la carpeta `config` con `precios.json`: si existe, el
-programa usa esos precios, así que se pueden actualizar sin volver a generar el ejecutable.
-Comprobación sin ventanas: `EstudioPotencia.exe --prueba curva.xlsx informe.pdf` (resultado en `informe.pdf.txt`).
+`construir_exe.py` genera `dist/EstudioPotencia.exe` (unos 55 MB; conviene compilar desde un entorno limpio y no
+desde Anaconda, que da un ejecutable de más de 200 MB) y copia junto a él `config/precios.json` (si existe, el
+programa usa esos precios, así que se pueden actualizar sin regenerarlo) y `LEEME.txt`.
+
+**Credenciales de Gemweb incluidas.** El script mete en el ejecutable las credenciales de la API de Gemweb de GE&PE,
+para que los compañeros no tengan que introducirlas. Las lee de un `secrets.toml` local (argumento,
+`credenciales_gemweb.toml` en el proyecto o `..\API_Gemweb\.streamlit\secrets.toml`), comprueba que funcionan y
+las escribe ofuscadas en `potencia/_credenciales_incluidas.py` solo durante la compilación: ese módulo está en
+`.gitignore` (el script se detiene si no lo estuviera) y se borra al terminar junto con la carpeta `build`.
+**Nunca hay credenciales en el repositorio.** Un usuario puede usar las suyas con «Usar otras credenciales…».
+
+Comprobaciones sin ventanas: `EstudioPotencia.exe --prueba curva.xlsx informe.pdf` (resultado en `informe.pdf.txt`)
+y `EstudioPotencia.exe --prueba-gemweb CUPS resultado.txt`.
 
 ## Pruebas
 

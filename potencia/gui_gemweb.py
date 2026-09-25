@@ -35,7 +35,7 @@ class DialogoCredenciales(tk.Toplevel):
         marco.pack(fill="both", expand=True)
         ttk.Label(marco, text="Credenciales de la API de Gemweb", font=("Arial", 10, "bold")).grid(
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
-        actuales = gemweb.cargar_credenciales()
+        actuales = gemweb.credenciales_propias()     # las incluidas en el programa no se muestran nunca
         self.v_id = tk.StringVar(value=actuales[0] if actuales else "")
         self.v_secreto = tk.StringVar(value=actuales[1] if actuales else "")
         ttk.Label(marco, text="Client ID:").grid(row=1, column=0, sticky="w", pady=3)
@@ -111,8 +111,10 @@ class DialogoGemweb(tk.Toplevel):
         marco.pack(fill="both", expand=True)
         cab = ttk.Frame(marco)
         cab.pack(fill="x")
-        ttk.Label(cab, text=f"Conectado como: {credenciales[0]}", font=FUENTE_B).pack(side="left")
-        ttk.Button(cab, text="Cambiar credenciales…", command=self._cambiar_credenciales).pack(side="right")
+        texto = ("Conexión: credenciales de GE&PE incluidas en el programa" if gemweb.usa_credenciales_incluidas()
+                 else f"Conectado como: {credenciales[0]}")
+        ttk.Label(cab, text=texto, font=FUENTE_B).pack(side="left")
+        ttk.Button(cab, text="Usar otras credenciales…", command=self._cambiar_credenciales).pack(side="right")
 
         caja = ttk.LabelFrame(marco, text="CUPS a descargar" + (" (uno por línea, o separados por ; o ,)"
                                                               if multipunto else ""), padding=8)

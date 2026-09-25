@@ -1,13 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Ejecutable de Windows:  python -m PyInstaller EstudioPotencia.spec --noconfirm
-# Resultado: dist/EstudioPotencia.exe (y copiar dist/config/precios.json junto al .exe para poder actualizar precios).
+# No lanzar directamente: usar construir_exe.py, que incluye las credenciales de Gemweb sin pasar por git,
+# copia config/precios.json y el LEEME junto al .exe y comprueba el resultado.
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
     datas=[('config/precios.json', 'config'), ('assets/logo_geype.png', 'assets')],
-    hiddenimports=['matplotlib.backends.backend_tkagg', 'matplotlib.backends.backend_agg', 'xlrd', 'openpyxl'],
+    hiddenimports=['matplotlib.backends.backend_tkagg', 'matplotlib.backends.backend_agg', 'xlrd', 'openpyxl',
+                   'potencia._credenciales_incluidas'],     # lo genera construir_exe.py (no está en git)
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

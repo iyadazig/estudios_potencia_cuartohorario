@@ -1,0 +1,32 @@
+ESTUDIO DE OPTIMIZACIÓN DE LA POTENCIA CONTRATADA – GE&PE
+=========================================================
+
+Uso: doble clic en EstudioPotencia.exe (no necesita Python instalado).
+
+Curvas de carga
+---------------
+- «Cargar curva de carga…»: fichero CSV, TXT o Excel.
+- «Descargar de Gemweb…»: descarga la curva cuartohoraria de los CUPS indicados
+  directamente de la API de Gemweb. El programa ya incluye las credenciales de
+  GE&PE: no hay que introducir nada. (Con «Usar otras credenciales…» cada usuario
+  puede usar las suyas; se guardan cifradas en su perfil de Windows.)
+
+  IMPORTANTE: el ejecutable lleva dentro el acceso a la API de Gemweb de GE&PE.
+  Compártelo solo dentro de la empresa.
+
+Precios regulados
+-----------------
+El programa usa config\precios.json si está junto al .exe (carpeta "config").
+Para actualizar los precios cada año basta con editar ese fichero; no hace falta
+volver a generar el ejecutable. Si se borra la carpeta "config", el programa usa
+los precios con los que se generó (2026).
+
+Para copiar el programa a otro ordenador, copiar EstudioPotencia.exe junto con la
+carpeta "config".
+
+Comprobaciones sin ventanas (por ejemplo, en un equipo nuevo)
+-------------------------------------------------------------
+    EstudioPotencia.exe --prueba curva.xlsx informe.pdf
+        Genera informe.pdf y el resultado en informe.pdf.txt ("OK" o el error).
+    EstudioPotencia.exe --prueba-gemweb CUPS resultado.txt
+        Comprueba la conexión con Gemweb descargando una semana de ese CUPS.
