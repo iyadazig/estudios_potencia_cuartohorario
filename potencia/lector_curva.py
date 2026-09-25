@@ -292,6 +292,10 @@ def _puntuar_hoja(nombre, df):
     n = _norm(nombre or "")
     if any(k in n for k in ("curva", "potencia", "consumo", "carga", "datos")):
         puntos *= 1.5
+    if re.fullmatch(r"curva[ _]?potencia", n):
+        puntos *= 3          # hoja de la curva en los Excel de estudio de GE&PE
+    if "campos" in n:
+        puntos *= 0.2        # hojas auxiliares «Curva 2 campos» / «Curva 4 campos» de esos Excel
     return puntos
 
 

@@ -39,6 +39,12 @@ def ruta_recurso(relativa):
 
 
 def cargar_precios(ruta=None):
+    """Precios regulados. En el ejecutable se usa config/precios.json junto al .exe si existe (así se pueden
+    actualizar cada año sin volver a generarlo); si no, el incluido en el propio ejecutable."""
+    if ruta is None and getattr(sys, "frozen", False):
+        externo = Path(sys.executable).resolve().parent / "config" / "precios.json"
+        if externo.exists():
+            ruta = externo
     ruta = Path(ruta) if ruta else ruta_recurso("config/precios.json")
     with open(ruta, encoding="utf-8") as f:
         return json.load(f)

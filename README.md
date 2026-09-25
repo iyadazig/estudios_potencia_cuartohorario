@@ -114,6 +114,19 @@ potencia/
 tests/                     pruebas con curvas sintéticas en 6 formatos distintos
 ```
 
+## Ejecutable de Windows (.exe)
+
+```bash
+python -m venv .venv_exe
+.venv_exe\Scripts\python -m pip install numpy pandas matplotlib openpyxl xlrd reportlab pillow pyinstaller
+.venv_exe\Scripts\python -m PyInstaller EstudioPotencia.spec --noconfirm
+```
+
+Se genera `dist/EstudioPotencia.exe` (unos 50 MB; conviene compilar desde un entorno limpio y no desde Anaconda, que
+da un ejecutable de más de 200 MB). Junto al `.exe` se copia la carpeta `config` con `precios.json`: si existe, el
+programa usa esos precios, así que se pueden actualizar sin volver a generar el ejecutable.
+Comprobación sin ventanas: `EstudioPotencia.exe --prueba curva.xlsx informe.pdf` (resultado en `informe.pdf.txt`).
+
 ## Pruebas
 
 ```bash
