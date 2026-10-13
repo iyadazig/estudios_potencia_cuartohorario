@@ -5,7 +5,10 @@ Uso: doble clic en EstudioPotencia.exe (no necesita Python instalado).
 
 Curvas de carga
 ---------------
-- «Cargar curva de carga…»: fichero CSV, TXT o Excel.
+- «Cargar curva de carga…»: uno o varios ficheros CSV, TXT o Excel (por ejemplo, un
+  Excel por mes, de uno o de varios CUPS). En la lista de ficheros:
+  «Añadir ficheros…» (Ctrl + clic para marcar varios a la vez) o «Añadir todos los
+  de una carpeta…», y después «Aceptar y analizar»: se unen todos en una curva.
 - «Descargar de Gemweb…»: descarga la curva cuartohoraria de los CUPS indicados
   directamente de la API de Gemweb. El programa ya incluye las credenciales de
   GE&PE: no hay que introducir nada. (Con «Usar otras credenciales…» cada usuario

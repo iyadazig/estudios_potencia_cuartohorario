@@ -71,7 +71,8 @@ El lector (`potencia/lector_curva.py`) detecta automáticamente:
 | Varios CUPS | Se elige cuál estudiar (en multipunto se usan todos) |
 | Varios ficheros | Se pueden seleccionar varios a la vez (p. ej. un Excel por mes y por CUPS, incluso de formatos distintos) |
 
-**Varios ficheros.** En «Cargar curva de carga…» se pueden seleccionar varios ficheros a la vez. Cada uno se interpreta
+**Varios ficheros.** «Cargar curva de carga…» abre una lista de ficheros: «Añadir ficheros…» (selección múltiple
+con Ctrl/Mayús, desde una o varias carpetas) o «Añadir todos los de una carpeta…», y «Aceptar y analizar». Cada uno se interpreta
 por separado (formato, unidad, convenio horario) y los registros de cada CUPS se unen en una sola curva. El CUPS de
 cada fichero se toma de su columna de CUPS o, si no la tiene, del nombre del fichero o del texto encima de la tabla
 (los ficheros sin CUPS solo se usan si todos son del mismo suministro). Se avisa de los cuartos de hora que aparecen

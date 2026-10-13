@@ -144,6 +144,113 @@ class SelectorZona(tk.Toplevel):
         self.destroy()
 
 
+class DialogoFicheros(tk.Toplevel):
+    """
+    Lista de ficheros de curva a cargar: se pueden añadir varios a la vez, de una o varias carpetas
+    (p. ej. un Excel por mes y por CUPS); al pulsar «Aceptar» se analizan todos juntos.
+    """
+
+    EXTENSIONES = (".csv", ".txt", ".xlsx", ".xlsm", ".xls", ".dat")
+
+    def __init__(self, padre, abrir_selector=True):
+        super().__init__(padre)
+        self.title("Ficheros de la curva de carga")
+        self.geometry("900x540")
+        self.minsize(680, 420)
+        self.rutas = []          # resultado: lista de rutas al aceptar
+        self._lista = []
+
+        marco = ttk.Frame(self, padding=12)
+        marco.pack(fill="both", expand=True)
+        titulo = ttk.Label(marco, font=FUENTE_B, text="Selecciona uno o varios ficheros con la curva de carga "
+                                                     "(por ejemplo, un Excel por mes, de uno o de varios CUPS).")
+        titulo.pack(fill="x")
+        ayuda = ttk.Label(marco, foreground="#555555", justify="left",
+                          text="En la ventana de Windows, mantén pulsada la tecla Ctrl y haz clic en cada fichero "
+                               "para marcar varios (Mayús para marcar un rango, Ctrl+E para todos) y pulsa «Abrir». "
+                               "Puedes repetirlo para añadir ficheros de otras carpetas.")
+        ayuda.pack(fill="x", pady=(2, 8))
+        # los textos se parten en líneas según el ancho de la ventana
+        marco.bind("<Configure>", lambda e: [w.configure(wraplength=max(200, e.width - 30)) for w in (titulo, ayuda)])
+
+        botones = ttk.Frame(marco)
+        botones.pack(fill="x")
+        ttk.Button(botones, text="➕  Añadir ficheros…", command=self.anadir_ficheros).pack(side="left")
+        ttk.Button(botones, text="📁  Añadir todos los de una carpeta…",
+                   command=self.anadir_carpeta).pack(side="left", padx=6)
+        ttk.Button(botones, text="Vaciar la lista", command=self.vaciar).pack(side="right")
+        ttk.Button(botones, text="Quitar los marcados", command=self.quitar).pack(side="right", padx=6)
+
+        caja = ttk.Frame(marco)
+        caja.pack(fill="both", expand=True, pady=8)
+        self.lista = tk.Listbox(caja, selectmode="extended", font=FUENTE, activestyle="none")
+        barra = ttk.Scrollbar(caja, command=self.lista.yview)
+        self.lista.configure(yscrollcommand=barra.set)
+        self.lista.pack(side="left", fill="both", expand=True)
+        barra.pack(side="right", fill="y")
+        self.lista.bind("<Delete>", lambda e: self.quitar())
+
+        pie = ttk.Frame(marco)
+        pie.pack(fill="x")
+        self.lb_total = ttk.Label(pie, text="", font=FUENTE_B)
+        self.lb_total.pack(side="left")
+        ttk.Button(pie, text="Cancelar", command=self.destroy).pack(side="right", padx=(6, 0))
+        self.btn_aceptar = boton(pie, "✔  Aceptar y analizar", self.aceptar, ancho=20, alto=1, fuente=10)
+        self.btn_aceptar.pack(side="right")
+        self._actualizar()
+
+        self.transient(padre)
+        self.grab_set()
+        if abrir_selector:
+            self.after(150, self.anadir_ficheros)
+
+    def _actualizar(self):
+        self.lista.delete(0, "end")
+        for r in self._lista:
+            self.lista.insert("end", f"{Path(r).name}      —  carpeta {Path(r).parent.name}")
+        n = len(self._lista)
+        self.lb_total.config(text="Ningún fichero seleccionado" if not n else
+                             f"{n} fichero{'s' if n > 1 else ''} seleccionado{'s' if n > 1 else ''}")
+        self.btn_aceptar.configure(state="normal" if n else "disabled")
+
+    def anadir(self, rutas):
+        for r in rutas:
+            r = str(Path(r))
+            if r not in self._lista and not Path(r).name.startswith("~$"):      # sin ficheros temporales de Excel
+                self._lista.append(r)
+        self._actualizar()
+
+    def anadir_ficheros(self):
+        rutas = filedialog.askopenfilenames(
+            parent=self, title="Selecciona los ficheros de curva (Ctrl + clic para marcar varios)",
+            filetypes=[("Curvas de carga", "*.csv *.txt *.xlsx *.xlsm *.xls *.dat"), ("Todos", "*.*")])
+        self.anadir(rutas)
+
+    def anadir_carpeta(self):
+        carpeta = filedialog.askdirectory(parent=self, title="Carpeta con los ficheros de curva")
+        if not carpeta:
+            return
+        rutas = sorted(str(f) for f in Path(carpeta).iterdir()
+                       if f.is_file() and f.suffix.lower() in self.EXTENSIONES)
+        if not rutas:
+            messagebox.showinfo("Carpeta sin curvas", "La carpeta no contiene ficheros CSV, TXT o Excel.", parent=self)
+        self.anadir(rutas)
+
+    def quitar(self):
+        marcados = set(self.lista.curselection())
+        self._lista = [r for k, r in enumerate(self._lista) if k not in marcados]
+        self._actualizar()
+
+    def vaciar(self):
+        self._lista = []
+        self._actualizar()
+
+    def aceptar(self):
+        if self._lista:
+            self.rutas = list(self._lista)
+            self.destroy()
+
+
 class DialogoCarga(tk.Toplevel):
     """Muestra cómo se ha interpretado la curva y permite corregir los ajustes."""
 
@@ -1044,9 +1151,9 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ carga
     def cargar_curva(self):
-        rutas = filedialog.askopenfilenames(
-            title="Selecciona la curva de carga (puedes elegir varios ficheros: uno por mes, por CUPS…)",
-            filetypes=[("Curvas de carga", "*.csv *.txt *.xlsx *.xlsm *.xls *.dat"), ("Todos", "*.*")])
+        sel = DialogoFicheros(self)
+        self.wait_window(sel)
+        rutas = sel.rutas
         if not rutas:
             return
         ruta = rutas[0]
