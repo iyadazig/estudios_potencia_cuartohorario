@@ -71,6 +71,8 @@ class CurvaCargada:
     origen_unidad: str = ""
     huecos_rellenados: int = 0
     dias_cambio_hora: list = field(default_factory=list)
+    ficheros: list = field(default_factory=list)       # resumen de cada fichero leído
+    sin_datos: list = field(default_factory=list)      # periodos largos sin datos (no se rellenan)
 
     @property
     def fecha_inicio(self):
@@ -87,6 +89,8 @@ class CurvaCargada:
     @property
     def descripcion_unidad(self):
         """Unidad, de dónde se ha sacado y cómo se pasa a potencia en kW."""
+        if self.unidad not in _POTENCIA and self.unidad not in _ENERGIA:      # varios ficheros con unidades distintas
+            return f"{self.unidad} – {self.origen_unidad}"
         if self.unidad in _POTENCIA:
             como = "valores de potencia: se usan directamente" + (
                 "" if self.unidad == "kW" else f" (pasados de {self.unidad} a kW)")
@@ -299,6 +303,123 @@ def _puntuar_hoja(nombre, df):
     return puntos
 
 
+def _cups_en_texto(texto):
+    """CUPS que aparecen en un texto (nombre de fichero, notas encima de la tabla), sin repetir."""
+    vistos = []
+    for m in re.finditer(r"ES\d{16}[A-Z]{2}(?:\d[A-Z])?", str(texto).upper()):
+        if m.group(0) not in vistos:
+            vistos.append(m.group(0))
+    return vistos
+
+
+def _a_hora_reloj(reg, paso, ordinal, zona):
+    """
+    Registros con posición cronológica dentro del día (horas 1-25, columnas por hora…) -> hora de reloj
+    en los días de cambio de hora. Si ya están en hora de reloj, no cambia nada.
+    """
+    if not ordinal:
+        return reg
+    reg = reg.copy()
+    h_cambio = hora_cambio_horario(zona) * 60
+    anios = sorted({d.year for d in pd.DatetimeIndex(reg["dia"])})
+    marzo = {pd.Timestamp(dias_cambio_hora(a)[0]) for a in anios}
+    octubre = {pd.Timestamp(dias_cambio_hora(a)[1]) for a in anios}
+    max_min = reg.groupby("dia")["minuto"].transform("max")
+    es_mar = reg["dia"].isin(marzo) & (max_min <= 1440 - 60 - paso)
+    es_oct = reg["dia"].isin(octubre) & (max_min >= 1440)
+    reg.loc[es_mar & (reg["minuto"] >= h_cambio), "minuto"] += 60
+    reg.loc[es_oct & (reg["minuto"] >= h_cambio + 60), "minuto"] -= 60
+    return reg[reg["minuto"] < 1440]
+
+
+def _a_paso(tabla, paso, paso_final):
+    """Registros horarios -> cuartos de hora (cada cuarto con la potencia media de su hora)."""
+    if paso == paso_final:
+        return tabla
+    rep = paso // paso_final
+    t = tabla.loc[tabla.index.repeat(rep)].copy()
+    t["minuto"] = t["minuto"].to_numpy() + np.tile(np.arange(rep) * paso_final, len(tabla))
+    return t
+
+
+def _componer(lista, zona):
+    """
+    Une los registros de uno o varios ficheros (p. ej. uno por mes) en una única curva normalizada.
+    lista: resultados de LectorCurva.registros (todos del mismo suministro).
+    """
+    avisos = []
+    varios = len(lista) > 1
+    for r in lista:
+        avisos += [f"{Path(r['archivo']).name}: {a}" if varios else a for a in r["avisos"]]
+    paso = min(r["paso"] for r in lista)
+    if len({r["paso"] for r in lista}) > 1:
+        avisos.append("Hay ficheros horarios y cuartohorarios: en los horarios cada cuarto de hora toma la potencia "
+                      "media de su hora.")
+    tablas = []
+    for k, r in enumerate(lista):
+        t = _a_paso(r["tabla"][["dia", "minuto", "kw"]], r["paso"], paso)
+        tablas.append(t.assign(fichero=k))
+    reg = pd.concat(tablas, ignore_index=True)
+
+    if varios:
+        # cuartos de hora que vienen en más de un fichero (ficheros que se solapan)
+        reg["inicio"] = pd.to_datetime(reg["dia"]) + pd.to_timedelta(reg["minuto"], unit="m")
+        en_varios = reg.groupby("inicio")["fichero"].nunique()
+        n_solape = int((en_varios > 1).sum())
+        if n_solape:
+            avisos.append(f"{n_solape} cuartos de hora aparecen en más de un fichero (los ficheros se solapan); "
+                          "se ha usado el promedio.")
+            # para que no cuenten además como «duplicados»: un valor por fichero y cuarto
+            reg = reg.groupby(["inicio", "fichero"], as_index=False).agg(
+                dia=("dia", "first"), minuto=("minuto", "first"), kw=("kw", "mean"))
+        reg = reg.drop(columns=["inicio"], errors="ignore")
+
+    serie, dias_ch, huecos, duplicados, sin_datos = LectorCurva._normalizar(reg.drop(columns="fichero"), paso,
+                                                                            False, zona)
+    if duplicados and not varios:
+        avisos.append(f"{duplicados} registros duplicados (distintos del cambio de hora) se han promediado.")
+    if huecos:
+        pct = 100.0 * huecos / len(serie)
+        avisos.append(f"Se han rellenado {huecos} intervalos sin dato ({pct:.2f} %) con el promedio "
+                      f"de la hora anterior y posterior.")
+        if pct > 5:
+            avisos.append("¡Atención! Más del 5 % de la curva es estimada: el resultado puede no ser fiable.")
+    for a, b in sin_datos:
+        avisos.append(f"¡Atención! No hay datos del {a:%d/%m/%Y %H:%M} al {b:%d/%m/%Y %H:%M}"
+                      + (" (¿falta algún fichero?)" if varios else "") + ": ese periodo no se rellena ni se "
+                      "factura, así que el estudio no corresponde a un año completo.")
+
+    if paso > 15:
+        serie = LectorCurva._a_cuartos(serie, paso)
+        avisos.append("Curva HORARIA: se ha estimado cada cuarto de hora con la potencia media de su hora "
+                      "(criterio del art. 9 de la Circular 3/2020 cuando no hay registro cuartohorario). "
+                      "Los picos de 15 minutos quedan suavizados y los excesos reales pueden ser mayores.")
+    serie = LectorCurva._recortar_12_meses(serie, avisos)
+
+    unidades = list(dict.fromkeys(r["unidad"] for r in lista))
+    convenios = list(dict.fromkeys(r["convenio"] for r in lista))
+    if len(unidades) == 1:
+        unidad, origen = unidades[0], lista[0]["origen_unidad"] + (" (en todos los ficheros)" if varios else "")
+    else:
+        unidad = "varias (" + ", ".join(unidades) + ")"
+        origen = "; ".join(f"{Path(r['archivo']).name}: {r['unidad']}, {r['origen_unidad']}" for r in lista)
+    ficheros = []
+    if varios:
+        for r in lista:
+            dias = pd.DatetimeIndex(r["tabla"]["dia"])
+            ficheros.append(f"{Path(r['archivo']).name}: {r.get('cups') or 'sin CUPS'} · "
+                            f"{dias.min():%d/%m/%Y} – {dias.max():%d/%m/%Y} · {r['unidad']}")
+    cups = next((r["cups"] for r in lista if r.get("cups")), None)
+    return CurvaCargada(
+        datos=serie.reset_index(drop=True),
+        archivo="; ".join(Path(r["archivo"]).name if varios else r["archivo"] for r in lista),
+        hoja=lista[0]["hoja"] if not varios else None,
+        resolucion_min=paso, unidad=unidad, origen_unidad=origen,
+        convenio=convenios[0] if len(convenios) == 1 else "; ".join(convenios), cups=cups,
+        columnas=lista[0]["columnas"], avisos=avisos, n_registros=sum(r["n_registros"] for r in lista),
+        huecos_rellenados=int(huecos), dias_cambio_hora=dias_ch, ficheros=ficheros, sin_datos=sin_datos)
+
+
 # --------------------------------------------------------------------------
 # lector
 # --------------------------------------------------------------------------
@@ -321,6 +442,28 @@ class LectorCurva:
     # ------------------------------------------------------------------
     def procesar(self, zona="Península", unidad="Automática", convenio="Automático",
                  hoja=None, cups=None):
+        """Curva del fichero (del CUPS indicado si el fichero tiene varios), normalizada a cuartos de hora."""
+        return _componer([self.registros(zona, unidad, convenio, hoja, cups)], zona)
+
+    def cups_en_fichero(self, hoja=None):
+        """CUPS del fichero: los de su columna de CUPS o, si no tiene, el del nombre o el texto encima de la tabla."""
+        hoja = self.hoja_defecto if hoja is None else hoja
+        df = self.tablas[hoja].reset_index(drop=True)
+        cab, datos, preambulo = self._separar_cabecera(df)
+        nombres = [(_norm(c) if not _vacio(c) else "") for c in cab] if cab is not None else [""] * df.shape[1]
+        datos = datos.copy()
+        datos.columns = range(datos.shape[1])
+        col = self._clasificar_columnas(datos, nombres)
+        if col.get("cups") is not None:
+            serie = datos[col["cups"]].astype(str).str.strip().str.upper()
+            return [c for c in serie.value_counts().index if _RE_CUPS.match(c)], True
+        return _cups_en_texto(Path(self.ruta).stem + " " + preambulo), False
+
+    def registros(self, zona="Península", unidad="Automática", convenio="Automático", hoja=None, cups=None):
+        """
+        Registros del fichero en hora de reloj (sin normalizar todavía): dict con la tabla (dia, minuto, kw),
+        el paso, la unidad, el convenio, los avisos y el CUPS. Varios ficheros se unen con _componer.
+        """
         hoja = self.hoja_defecto if hoja is None else hoja
         df = self.tablas[hoja].reset_index(drop=True)
         avisos = []
@@ -344,10 +487,15 @@ class LectorCurva:
                     avisos.append(f"El fichero contiene {len(self.cups_disponibles)} CUPS; "
                                   f"se usa {cups_sel}.")
                 datos = datos[serie_cups == cups_sel]
+        else:
+            # sin columna de CUPS: el del nombre del fichero o el del texto encima de la tabla
+            en_texto = _cups_en_texto(Path(self.ruta).stem + " " + preambulo)
+            if len(en_texto) == 1:
+                cups_sel = en_texto[0]
+                self.cups_disponibles = en_texto
 
         registros, paso, conv_txt, ordinal = self._construir_registros(datos, col, zona, convenio, avisos)
-        n_registros = len(registros)
-        if n_registros == 0:
+        if len(registros) == 0:
             raise ValueError("No se han podido interpretar registros de fecha/hora y valor.")
 
         # unidad
@@ -370,32 +518,10 @@ class LectorCurva:
             avisos.append(f"{negativos} registros con valor negativo se han puesto a 0.")
             registros.loc[registros["kw"] < 0, "kw"] = 0.0
 
-        serie, dias_ch, huecos, duplicados = self._normalizar(registros, paso, ordinal, zona)
-        if duplicados:
-            avisos.append(f"{duplicados} registros duplicados (distintos del cambio de hora) se han promediado.")
-        if huecos:
-            pct = 100.0 * huecos / len(serie)
-            avisos.append(f"Se han rellenado {huecos} intervalos sin dato ({pct:.2f} %) con el promedio "
-                          f"de la hora anterior y posterior.")
-            if pct > 5:
-                avisos.append("¡Atención! Más del 5 % de la curva es estimada: el resultado puede no ser fiable.")
-
-        if paso > 15:
-            serie = self._a_cuartos(serie, paso)
-            avisos.append("Curva HORARIA: se ha estimado cada cuarto de hora con la potencia media de su hora "
-                          "(criterio del art. 9 de la Circular 3/2020 cuando no hay registro cuartohorario). "
-                          "Los picos de 15 minutos quedan suavizados y los excesos reales pueden ser mayores.")
-
-        serie = self._recortar_12_meses(serie, avisos)
-
-        return CurvaCargada(
-            datos=serie.reset_index(drop=True),
-            archivo=self.ruta, hoja=hoja, resolucion_min=paso, unidad=unidad_det, origen_unidad=origen,
-            convenio=conv_txt, cups=cups_sel,
-            columnas={k: v for k, v in col.items() if k.startswith("nombre_") or k == "formato"},
-            avisos=avisos, n_registros=n_registros, huecos_rellenados=int(huecos),
-            dias_cambio_hora=dias_ch,
-        )
+        return {"tabla": _a_hora_reloj(registros, paso, ordinal, zona), "paso": paso, "convenio": conv_txt,
+                "unidad": unidad_det, "origen_unidad": origen, "avisos": avisos, "cups": cups_sel,
+                "archivo": self.ruta, "hoja": hoja, "n_registros": len(registros),
+                "columnas": {k: v for k, v in col.items() if k.startswith("nombre_") or k == "formato"}}
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -773,14 +899,7 @@ class LectorCurva:
         octubre = {pd.Timestamp(dias_cambio_hora(a)[1]) for a in anios}
 
         if ordinal:
-            # posición cronológica -> hora de reloj en los días de cambio de hora
-            max_min = reg.groupby("dia")["minuto"].transform("max")
-            es_mar = reg["dia"].isin(marzo) & (max_min <= 1440 - 60 - paso)
-            es_oct = reg["dia"].isin(octubre) & (max_min >= 1440)
-            reg.loc[es_mar & (reg["minuto"] >= h_cambio), "minuto"] += 60
-            reg.loc[es_oct & (reg["minuto"] >= h_cambio + 60), "minuto"] -= 60
-            fuera = reg["minuto"] >= 1440
-            reg = reg[~fuera]
+            reg = _a_hora_reloj(reg, paso, ordinal, zona)
 
         reg["inicio"] = pd.to_datetime(reg["dia"]) + pd.to_timedelta(reg["minuto"], unit="m")
 
@@ -823,9 +942,17 @@ class LectorCurva:
             serie = serie.where(~hueco, estim)
         if serie.isna().any():
             serie = serie.interpolate(limit_direction="both")
-        huecos = int((falta & ~marzo_falta).sum())
+
+        # los huecos de más de 2 días (p. ej. un mes sin fichero) NO se inventan: se dejan sin datos
+        tramo = (falta != falta.shift()).cumsum()
+        largo = falta & falta.groupby(tramo).transform("size").ge(2 * 1440 // paso)
+        sin_datos = []
+        for _, bloque in serie.index[largo].to_series().groupby(tramo[largo]):
+            sin_datos.append((bloque.iloc[0], bloque.iloc[-1] + pd.Timedelta(minutes=paso)))
+        huecos = int((falta & ~marzo_falta & ~largo).sum())
         salida = pd.DataFrame({"inicio": serie.index, "kw": serie.to_numpy(), "estimado": falta.to_numpy()})
-        return salida, dias_ch, huecos, duplicados
+        salida = salida[~largo.to_numpy()].reset_index(drop=True)
+        return salida, dias_ch, huecos, duplicados, sin_datos
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -860,3 +987,70 @@ class LectorCurva:
         if dias < 360:
             avisos.append(f"La curva solo cubre {dias} días: los importes NO corresponden a un año completo.")
         return serie
+
+
+class LectorCurvas:
+    """
+    Varios ficheros de curva leídos como uno solo: por ejemplo, un Excel por mes y por CUPS.
+    Cada fichero se interpreta por separado (formato, unidad, convenio horario) y después se
+    unen los registros de cada CUPS. Misma interfaz que LectorCurva.
+    """
+
+    def __init__(self, rutas):
+        self.rutas = [str(r) for r in rutas]
+        self.lectores, errores = [], []
+        for r in self.rutas:
+            try:
+                self.lectores.append(LectorCurva(r))
+            except Exception as e:
+                errores.append(f"{Path(r).name}: {e}")
+        if errores:
+            raise ValueError("No se han podido leer estos ficheros:\n" + "\n".join(errores))
+        self.ruta = f"{len(self.rutas)} ficheros"
+        self.hojas = [None]          # cada fichero usa su hoja con la curva
+        self.hoja_defecto = None
+        # CUPS de cada fichero (columna CUPS, nombre del fichero o texto encima de la tabla)
+        self._cups = []
+        for lector in self.lectores:
+            try:
+                self._cups.append(lector.cups_en_fichero())
+            except Exception:
+                self._cups.append(([], False))
+        self.cups_disponibles = list(dict.fromkeys(c for lista, _ in self._cups for c in lista))
+
+    def procesar(self, zona="Península", unidad="Automática", convenio="Automático", hoja=None, cups=None):
+        objetivo = cups if cups in self.cups_disponibles else (self.cups_disponibles[0] if self.cups_disponibles
+                                                                else None)
+        lista, sin_cups, errores = [], [], []
+        for lector, (cups_fichero, _) in zip(self.lectores, self._cups):
+            nombre = Path(lector.ruta).name
+            if objetivo is not None and cups_fichero and objetivo not in cups_fichero:
+                continue                                   # fichero de otro CUPS
+            if objetivo is not None and not cups_fichero:
+                if len(self.cups_disponibles) > 1:
+                    sin_cups.append(nombre)                # no se sabe de qué CUPS es
+                    continue
+            try:
+                lista.append(lector.registros(zona, unidad, convenio, None, objetivo))
+            except Exception as e:
+                errores.append(f"{nombre}: {e}")
+        if not lista:
+            raise ValueError("Ningún fichero tiene datos válidos" + (f" del CUPS {objetivo}" if objetivo else "")
+                             + (":\n" + "\n".join(errores) if errores else "."))
+        curva = _componer(lista, zona)
+        if objetivo:
+            curva.cups = objetivo
+        if sin_cups:
+            curva.avisos.append("Estos ficheros no indican su CUPS (ni en una columna, ni en el nombre, ni encima "
+                                "de la tabla) y hay varios CUPS, así que no se han usado: " + ", ".join(sin_cups))
+        curva.avisos += [f"No se ha podido leer {e}" for e in errores]
+        if len(self.cups_disponibles) > 1:
+            curva.avisos.append(f"Los ficheros contienen {len(self.cups_disponibles)} CUPS; se usa {objetivo}.")
+        self.cups_disponibles = list(dict.fromkeys(c for lista_c, _ in self._cups for c in lista_c))
+        return curva
+
+
+def abrir_curvas(rutas):
+    """LectorCurva para un fichero; LectorCurvas para varios."""
+    rutas = list(rutas)
+    return LectorCurva(rutas[0]) if len(rutas) == 1 else LectorCurvas(rutas)

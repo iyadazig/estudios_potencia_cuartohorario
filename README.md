@@ -68,7 +68,14 @@ El lector (`potencia/lector_curva.py`) detecta automáticamente:
 | Hora | `HH:MM`, horas enteras 0-23 o 1-24/25, fracciones de día de Excel, ISO 8601 con desfase horario |
 | Resolución | Cuartohoraria (15 min) u horaria (60 min) |
 | Unidad | kW, MW o W (potencia media: se usa tal cual) o kWh, MWh o Wh (energía del intervalo: se convierte a kW) |
-| Varios CUPS | Se elige cuál estudiar |
+| Varios CUPS | Se elige cuál estudiar (en multipunto se usan todos) |
+| Varios ficheros | Se pueden seleccionar varios a la vez (p. ej. un Excel por mes y por CUPS, incluso de formatos distintos) |
+
+**Varios ficheros.** En «Cargar curva de carga…» se pueden seleccionar varios ficheros a la vez. Cada uno se interpreta
+por separado (formato, unidad, convenio horario) y los registros de cada CUPS se unen en una sola curva. El CUPS de
+cada fichero se toma de su columna de CUPS o, si no la tiene, del nombre del fichero o del texto encima de la tabla
+(los ficheros sin CUPS solo se usan si todos son del mismo suministro). Se avisa de los cuartos de hora que aparecen
+en más de un fichero.
 
 **Unidad.** Se lee de los títulos de las columnas y del resto del fichero, por este orden: el título de la columna de
 valores (`Potencia (kW)`, `AE_kWh`, `Consumo [MWh]`…, incluida una fila de unidades debajo de los títulos), una
@@ -85,8 +92,9 @@ cuarto del día es `00:15` y el último `00:00` del día siguiente (`24:00`); en
 - día de 23 h (marzo): la hora inexistente se rellena con el promedio de la hora anterior y la posterior;
 - día de 25 h (octubre): la hora repetida se sustituye por el promedio de sus dos registros.
 
-**Huecos** sin dato: se rellenan con el promedio de la hora anterior y posterior y se avisa del número de
-intervalos estimados.
+**Huecos** sin dato: los cortos se rellenan con el promedio de la hora anterior y posterior y se avisa del número
+de intervalos estimados. Los de **más de 2 días** (por ejemplo, un mes del que no se ha cargado fichero) **no se
+inventan**: se dejan sin datos y se avisa del periodo, porque el estudio ya no corresponde a un año completo.
 
 **Curvas horarias.** Cada cuarto de hora toma la potencia media de su hora (art. 9 de la Circular 3/2020, cuando no
 hay registro cuartohorario). Los picos de 15 minutos quedan suavizados, por lo que los excesos reales pueden ser

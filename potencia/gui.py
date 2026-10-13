@@ -1,6 +1,7 @@
 """Interfaz gráfica (tkinter) del estudio de optimización de potencia."""
 
 import os
+import re
 import tkinter as tk
 from datetime import date, datetime
 from pathlib import Path
@@ -15,7 +16,7 @@ from .calculo import (N_P, Estudio, ResumenMultipunto, Tarifa, cargar_precios, e
 from .calendario import ZONAS
 from .graficos import (AZUL_BOTON, AZUL_OSCURO, COLORES_SUAVES, ROJO_GEYPE, color, dibujar_costes,
                        dibujar_curva_selector, dibujar_maximos)
-from .lector_curva import CONVENIOS, UNIDADES, LectorCurva
+from .lector_curva import CONVENIOS, UNIDADES, LectorCurva, abrir_curvas
 
 TARIFAS = ["6.1TD", "3.0TD"]
 MAX_PROPUESTAS = 6
@@ -253,6 +254,9 @@ class DialogoCarga(tk.Toplevel):
             lineas.insert(0, f"ESTUDIO MULTIPUNTO: {n} CUPS detectados" + (
                 " (los datos de arriba corresponden al primero)." if n else
                 ". ¡El fichero no tiene columna de CUPS: no se puede hacer un estudio multipunto!"))
+        if c.ficheros:
+            lineas.append(f"Ficheros leídos ({len(c.ficheros)}), unidos en una sola curva:")
+            lineas += [f"   • {f}" for f in c.ficheros]
         if c.dias_cambio_hora:
             lineas.append("Cambios de hora: " + "; ".join(c.dias_cambio_hora))
         if c.avisos:
@@ -1040,17 +1044,19 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------ carga
     def cargar_curva(self):
-        ruta = filedialog.askopenfilename(
-            title="Selecciona la curva de carga",
+        rutas = filedialog.askopenfilenames(
+            title="Selecciona la curva de carga (puedes elegir varios ficheros: uno por mes, por CUPS…)",
             filetypes=[("Curvas de carga", "*.csv *.txt *.xlsx *.xlsm *.xls *.dat"), ("Todos", "*.*")])
-        if not ruta:
+        if not rutas:
             return
+        ruta = rutas[0]
+        nombre = Path(ruta).name if len(rutas) == 1 else f"{len(rutas)} ficheros de curva"
         self.config(cursor="watch")
         self.update_idletasks()
         try:
-            lector = LectorCurva(ruta)
+            lector = abrir_curvas(rutas)
         except Exception as e:
-            messagebox.showerror("Error al leer el fichero", str(e))
+            messagebox.showerror("Error al leer el fichero" if len(rutas) == 1 else "Error al leer los ficheros", str(e))
             return
         finally:
             self.config(cursor="")
@@ -1060,15 +1066,17 @@ class App(tk.Tk):
             return
         self.lector, self.ajustes_carga = lector, dlg.ajustes
         if self.multipunto:
-            self._cargar_multipunto(ruta)
+            self._cargar_multipunto(ruta, nombre=nombre)
         else:
-            self._cargar_individual(ruta, dlg.resultado)
+            self._cargar_individual(ruta, dlg.resultado, nombre=nombre)
 
     def _procesar_curva(self, s):
         a = self.ajustes_carga or {}
         s.curva = self.lector.procesar(s.v_zona.get(), a.get("unidad", UNIDADES[0]),
                                        a.get("convenio", CONVENIOS[0]), a.get("hoja"),
                                        s.cups if self.multipunto else a.get("cups"))
+        if self.multipunto:     # en multipunto se usan todos los CUPS: el aviso de «se usa X» no aplica
+            s.curva.avisos = [x for x in s.curva.avisos if not re.search(r"contienen? \d+ CUPS; se usa", x)]
         s.zona_curva = s.v_zona.get()
         s.invalidar()
 
@@ -1235,7 +1243,13 @@ class App(tk.Tk):
                        f"Registros leídos: {c.n_registros:,}".replace(",", "."),
                        f"Periodo del estudio: {c.fecha_inicio:%d/%m/%Y %H:%M} – {c.fecha_fin:%d/%m/%Y %H:%M}",
                        f"Intervalos rellenados (huecos): {c.huecos_rellenados}",
-                       "Cambios de hora: " + ("; ".join(c.dias_cambio_hora) or "ninguno"), "Avisos:"]
+                       "Cambios de hora: " + ("; ".join(c.dias_cambio_hora) or "ninguno")]
+            if c.ficheros:
+                lineas += [f"Ficheros ({len(c.ficheros)}):"] + [f"  · {f}" for f in c.ficheros]
+            if c.sin_datos:
+                lineas += ["Periodos SIN DATOS (no se rellenan): " +
+                           "; ".join(f"{a:%d/%m/%Y %H:%M} – {b:%d/%m/%Y %H:%M}" for a, b in c.sin_datos)]
+            lineas.append("Avisos:")
             lineas += [f"  • {a}" for a in c.avisos] or ["  (ninguno)"]
             lineas.append("")
         if errores:
