@@ -123,6 +123,10 @@ Todos los precios están en [`config/precios.json`](config/precios.json) (2026: 
 Orden TED/1524/2025). Cada año hay que actualizar los peajes, cargos, `tep` y, si cambian, los derechos de acometida.
 En ese fichero se pueden añadir también festivos (`adicionales`) o excluirlos (`excluidos`).
 
+**El cálculo está también en la plataforma Herramientas GE&PE** (módulo «Estudio de potencia», repositorio
+Herramientas-GE-PE): su carpeta `potencia/` es copia de la de aquí, con los precios en `potencia/precios.json`.
+Mientras existan los dos, al actualizar los precios o cambiar el cálculo hay que hacerlo en los dos.
+
 ## Estructura
 
 ```
